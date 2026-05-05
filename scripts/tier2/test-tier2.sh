@@ -197,23 +197,32 @@ if [ -n "${K_EXPR}" ]; then
   K_ARGS=(-k "${K_EXPR}")
 fi
 
-echo "Starting tier2 tests 🧪"
+# Build pytest marker expression
+MARKERS="conformance"
+if [ "${ACCEPT_WINDOWS_EULA}" == "true" ]; then
+  echo "Windows EULA accepted - including Windows tests"
+  MARKERS="${MARKERS} or windows"
+fi
 
-if [ "${DRY_RUN}" == "true" ]; then
-  # In dry-run mode, collect tests and generate a proper JUnit XML with all
-  # testcase elements -- aligned with how Ginkgo's --ginkgo.dry-run works.
-  (set +e; .venv/bin/pytest \
-    -m "conformance" \
-    -W "ignore::pytest.PytestRemovedIn9Warning" \
-    --skip-artifactory-check \
-    --latest-rhel \
-    --tc=hco_subscription:${SUBSCRIPTION_NAME} \
-    --conformance-storage-class=${STORAGE_CLASS} \
-    ${STORAGE_CLASS_CONFIG} \
-    ${HCP_FLAG} \
-    --collect-only -q \
-    "${K_ARGS[@]}" \
-    2>&1; echo $? > "${ARTIFACTS}/.exit_code") | tee ${ARTIFACTS}/tier2-log.txt &
+echo "Starting tier2 tests 🧪"
+echo "Using markers: ${MARKERS}"
+
+(set +e; .venv/bin/pytest \
+  -m "${MARKERS}" \
+  -W "ignore::pytest.PytestRemovedIn9Warning" \
+  --skip-artifactory-check \
+  --latest-rhel \
+  --tc=hco_subscription:${SUBSCRIPTION_NAME} \
+  --conformance-storage-class=${STORAGE_CLASS} \
+  ${STORAGE_CLASS_CONFIG} \
+  ${HCP_FLAG} \
+  -s -o log_cli=true \
+  ${DRY_RUN_FLAG} \
+  "${SKIP_ARGS[@]}" \
+  --data-collector \
+  --data-collector-output-dir=${ARTIFACTS} \
+  --pytest-log-file=${ARTIFACTS}/pytest-logs.txt \
+  --junitxml="${ARTIFACTS}/junit.results.xml"; echo $? > "${ARTIFACTS}/.exit_code") 2>&1 | tee ${ARTIFACTS}/tier2-log.txt &
 
   TEST_PID=$!
   echo "Tier2 test process started with PID: ${TEST_PID}"
