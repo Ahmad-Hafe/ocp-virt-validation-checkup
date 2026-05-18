@@ -210,58 +210,27 @@ fi
 echo "Starting tier2 tests 🧪"
 echo "Using markers: ${MARKERS}"
 
-(set +e; .venv/bin/pytest \
-  -m "${MARKERS}" \
-  -W "ignore::pytest.PytestRemovedIn9Warning" \
-  --skip-artifactory-check \
-  --latest-rhel \
-  --tc=hco_subscription:${SUBSCRIPTION_NAME} \
-  --conformance-storage-class=${STORAGE_CLASS} \
-  ${STORAGE_CLASS_CONFIG} \
-  ${HCP_FLAG} \
-  -s -o log_cli=true \
-  ${DRY_RUN_FLAG} \
-  "${SKIP_ARGS[@]}" \
-  --data-collector \
-  --data-collector-output-dir=${ARTIFACTS} \
-  --pytest-log-file=${ARTIFACTS}/pytest-logs.txt \
-  --junitxml="${ARTIFACTS}/junit.results.xml"; echo $? > "${ARTIFACTS}/.exit_code") 2>&1 | tee ${ARTIFACTS}/tier2-log.txt &
+if [ "${DRY_RUN}" == "true" ]; then
+  # In dry-run mode, collect tests and generate a proper JUnit XML with all
+  # testcase elements -- aligned with how Ginkgo's --ginkgo.dry-run works.
+  (set +e; .venv/bin/pytest \
+    -m "${MARKERS}" \
+    -W "ignore::pytest.PytestRemovedIn9Warning" \
+    --skip-artifactory-check \
+    --latest-rhel \
+    --tc=hco_subscription:${SUBSCRIPTION_NAME} \
+    --conformance-storage-class=${STORAGE_CLASS} \
+    ${STORAGE_CLASS_CONFIG} \
+    ${HCP_FLAG} \
+    --collect-only -q \
+    "${K_ARGS[@]}" \
+    2>&1; echo $? > "${ARTIFACTS}/.exit_code") | tee ${ARTIFACTS}/tier2-log.txt &
 
   TEST_PID=$!
   echo "Tier2 test process started with PID: ${TEST_PID}"
   wait ${TEST_PID} || true
 
-# Wait for the test to complete
-wait ${TEST_PID} || true
-
-# Run local Windows tests if EULA is accepted
-if [ "${ACCEPT_WINDOWS_EULA}" == "true" ]; then
-  echo ""
-  echo "=== Running local Windows VM tests ==="
-  SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
-  if [ -d "${SCRIPT_DIR}/tests" ]; then
-    (set +e; .venv/bin/pytest \
-      "${SCRIPT_DIR}/tests" \
-      -m "windows" \
-      -v \
-      --junitxml="${ARTIFACTS}/junit.windows.xml" \
-      -s -o log_cli=true; echo $? > "${ARTIFACTS}/.windows_exit_code") 2>&1 | tee -a ${ARTIFACTS}/tier2-log.txt
-    
-    WINDOWS_EXIT_CODE=$(cat "${ARTIFACTS}/.windows_exit_code" 2>/dev/null || echo "1")
-    if [ "${WINDOWS_EXIT_CODE}" == "0" ]; then
-      echo "Windows tests PASSED!"
-    else
-      echo "Windows tests had failures (exit code: ${WINDOWS_EXIT_CODE})"
-    fi
-  else
-    echo "No local Windows tests found in ${SCRIPT_DIR}/tests"
-  fi
-fi
-
-# Add manually deselected tests (via TEST_SKIPS) to the JUnit XML skipped count,
-# since pytest -k deselection omits them from the report entirely.
-# Only count entries that match real conformance test names.
-if [ -n "${TEST_SKIPS}" ]; then
+  # Generate JUnit XML from collected test IDs, accounting for TEST_SKIPS
   .venv/bin/python -c "
 import subprocess, sys, socket
 from xml.etree.ElementTree import Element, SubElement, ElementTree
@@ -322,7 +291,7 @@ print(f'Generated JUnit XML with {total_tests} test(s) ({len(test_ids)} collecte
 
 else
   (set +e; .venv/bin/pytest \
-    -m "conformance" \
+    -m "${MARKERS}" \
     -W "ignore::pytest.PytestRemovedIn9Warning" \
     --skip-artifactory-check \
     --latest-rhel \
@@ -377,5 +346,29 @@ if matched:
         ts.set('skipped', str(int(ts.get('skipped', '0')) + len(matched)))
     tree.write(junit_path, xml_declaration=True, encoding='unicode')
 " "${ARTIFACTS}/junit.results.xml" "${TEST_SKIPS}" "${TEST_FOCUS}"
+  fi
+fi
+
+# Run local Windows tests if EULA is accepted
+if [ "${ACCEPT_WINDOWS_EULA}" == "true" ]; then
+  echo ""
+  echo "=== Running local Windows VM tests ==="
+  SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+  if [ -d "${SCRIPT_DIR}/tests" ]; then
+    (set +e; .venv/bin/pytest \
+      "${SCRIPT_DIR}/tests" \
+      -m "windows" \
+      -v \
+      --junitxml="${ARTIFACTS}/junit.windows.xml" \
+      -s -o log_cli=true; echo $? > "${ARTIFACTS}/.windows_exit_code") 2>&1 | tee -a ${ARTIFACTS}/tier2-log.txt
+    
+    WINDOWS_EXIT_CODE=$(cat "${ARTIFACTS}/.windows_exit_code" 2>/dev/null || echo "1")
+    if [ "${WINDOWS_EXIT_CODE}" == "0" ]; then
+      echo "Windows tests PASSED!"
+    else
+      echo "Windows tests had failures (exit code: ${WINDOWS_EXIT_CODE})"
+    fi
+  else
+    echo "No local Windows tests found in ${SCRIPT_DIR}/tests"
   fi
 fi

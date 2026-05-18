@@ -20,14 +20,18 @@ SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 
 # Golden images should be created in the standard OS images namespace
 GOLDEN_IMAGE_NAMESPACE="openshift-virtualization-os-images"
-GOLDEN_IMAGE_NAME="windows11-golden-image"
+
+# Default golden image name (can be overridden via WIN_IMAGE_NAME env var)
+# Users with existing Windows DataSource can skip the 60-90 min pipeline by setting WIN_IMAGE_NAME
+DEFAULT_WIN_GOLDEN_IMAGE_NAME="windows11-golden-image"
+GOLDEN_IMAGE_NAME="${WIN_IMAGE_NAME:-${DEFAULT_WIN_GOLDEN_IMAGE_NAME}}"
 
 # Default Windows 11 ISO URL (can be overridden via WIN_IMAGE_DOWNLOAD_URL env var)
 DEFAULT_WIN_IMAGE_URL="https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26200.6584.250915-1905.25h2_ge_release_svc_refresh_CLIENT_CONSUMER_x64FRE_en-us.iso"
 WIN_IMAGE_URL="${WIN_IMAGE_DOWNLOAD_URL:-${DEFAULT_WIN_IMAGE_URL}}"
 
-# Pipeline version for hub resolver
-PIPELINE_VERSION="${TEKTON_PIPELINE_VERSION:-v4.21.0}"
+# Pipeline version for hub resolver (>=v4.21.0 means 4.21 or newer)
+PIPELINE_VERSION="${TEKTON_PIPELINE_VERSION:->=v4.21.0}"
 
 echo "=== Windows Golden Image Setup ==="
 
@@ -40,8 +44,24 @@ if [ "${ACCEPT_WINDOWS_EULA}" != "true" ]; then
 fi
 
 echo "Microsoft EULA accepted by user"
+echo "Using golden image name: ${GOLDEN_IMAGE_NAME}"
 
-# Step 2: Check if OpenShift Pipelines is installed (check for Pipeline CRD)
+# Step 2: Ensure the golden image namespace exists
+echo "Ensuring namespace ${GOLDEN_IMAGE_NAMESPACE} exists..."
+if ! oc get namespace ${GOLDEN_IMAGE_NAMESPACE} &>/dev/null; then
+  echo "Creating namespace ${GOLDEN_IMAGE_NAMESPACE}..."
+  oc create namespace ${GOLDEN_IMAGE_NAMESPACE}
+fi
+
+# Step 3: Check if golden image DataSource already exists (earliest exit if image exists)
+echo "Checking if Windows golden image already exists..."
+if oc get datasource ${GOLDEN_IMAGE_NAME} -n ${GOLDEN_IMAGE_NAMESPACE} &>/dev/null; then
+  echo "Windows golden image DataSource '${GOLDEN_IMAGE_NAME}' already exists in ${GOLDEN_IMAGE_NAMESPACE}"
+  echo "Skipping image creation"
+  exit 0
+fi
+
+# Step 4: Check if OpenShift Pipelines is installed (check for Pipeline CRD)
 echo "Checking if OpenShift Pipelines operator is installed..."
 if ! oc get crd pipelines.tekton.dev &>/dev/null; then
   echo "ERROR: OpenShift Pipelines operator is not installed"
@@ -70,38 +90,13 @@ fi
 
 echo "OpenShift Pipelines operator is installed"
 
-# Step 3: Ensure the golden image namespace exists
-echo "Ensuring namespace ${GOLDEN_IMAGE_NAMESPACE} exists..."
-if ! oc get namespace ${GOLDEN_IMAGE_NAMESPACE} &>/dev/null; then
-  echo "Creating namespace ${GOLDEN_IMAGE_NAMESPACE}..."
-  oc create namespace ${GOLDEN_IMAGE_NAMESPACE}
-fi
-
-# Step 4: Ensure pipeline service account exists (required for Tekton)
+# Step 5: Ensure pipeline service account exists (required for Tekton)
 echo "Ensuring pipeline service account exists..."
 if ! oc get sa pipeline -n ${GOLDEN_IMAGE_NAMESPACE} &>/dev/null; then
   echo "Creating pipeline service account..."
   oc create serviceaccount pipeline -n ${GOLDEN_IMAGE_NAMESPACE}
   oc adm policy add-scc-to-user privileged -z pipeline -n ${GOLDEN_IMAGE_NAMESPACE}
   oc adm policy add-role-to-user edit -z pipeline -n ${GOLDEN_IMAGE_NAMESPACE}
-fi
-
-# Step 5: Check if golden image DataSource already exists
-echo "Checking if Windows golden image already exists..."
-if oc get datasource ${GOLDEN_IMAGE_NAME} -n ${GOLDEN_IMAGE_NAMESPACE} &>/dev/null; then
-  echo "Windows golden image DataSource already exists in ${GOLDEN_IMAGE_NAMESPACE}"
-  echo "Skipping image creation"
-  exit 0
-fi
-
-# Also check if the DataVolume exists
-if oc get dv ${GOLDEN_IMAGE_NAME} -n ${GOLDEN_IMAGE_NAMESPACE} &>/dev/null; then
-  DV_PHASE=$(oc get dv ${GOLDEN_IMAGE_NAME} -n ${GOLDEN_IMAGE_NAMESPACE} -o jsonpath='{.status.phase}')
-  if [ "${DV_PHASE}" == "Succeeded" ]; then
-    echo "Windows golden image DataVolume already exists and succeeded"
-    exit 0
-  fi
-  echo "Found existing DataVolume in phase: ${DV_PHASE}"
 fi
 
 # Step 6: Verify storage class is set (should be passed from entrypoint.sh)
@@ -149,7 +144,7 @@ spec:
     - name: winImageDownloadURL
       value: "${WIN_IMAGE_URL}"
     - name: acceptEula
-      value: "true"
+      value: "${ACCEPT_WINDOWS_EULA}"
     - name: baseDvName
       value: "${GOLDEN_IMAGE_NAME}"
     - name: baseDvNamespace

@@ -44,6 +44,12 @@ metadata:
     app: ocp-virt-validation-test
 spec:
   running: true
+  instancetype:
+    kind: VirtualMachineClusterInstancetype
+    name: u1.medium
+  preference:
+    kind: VirtualMachineClusterPreference
+    name: windows.11.virtio
   template:
     metadata:
       labels:
@@ -58,9 +64,6 @@ spec:
           interfaces:
             - name: default
               masquerade: {{}}
-        resources:
-          requests:
-            memory: 4Gi
       networks:
         - name: default
           pod: {{}}
