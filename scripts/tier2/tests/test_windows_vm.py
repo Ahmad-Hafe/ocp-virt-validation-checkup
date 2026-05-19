@@ -46,7 +46,7 @@ spec:
   running: true
   instancetype:
     kind: VirtualMachineClusterInstancetype
-    name: u1.medium
+    name: d1.large
   preference:
     kind: VirtualMachineClusterPreference
     name: windows.11.virtio
