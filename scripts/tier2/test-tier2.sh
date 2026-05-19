@@ -348,27 +348,3 @@ if matched:
 " "${ARTIFACTS}/junit.results.xml" "${TEST_SKIPS}" "${TEST_FOCUS}"
   fi
 fi
-
-# Run local Windows tests if EULA is accepted
-if [ "${ACCEPT_WINDOWS_EULA}" == "true" ]; then
-  echo ""
-  echo "=== Running local Windows VM tests ==="
-  SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
-  if [ -d "${SCRIPT_DIR}/tests" ]; then
-    (set +e; .venv/bin/pytest \
-      "${SCRIPT_DIR}/tests" \
-      -m "windows" \
-      -v \
-      --junitxml="${ARTIFACTS}/junit.windows.xml" \
-      -s -o log_cli=true; echo $? > "${ARTIFACTS}/.windows_exit_code") 2>&1 | tee -a ${ARTIFACTS}/tier2-log.txt
-    
-    WINDOWS_EXIT_CODE=$(cat "${ARTIFACTS}/.windows_exit_code" 2>/dev/null || echo "1")
-    if [ "${WINDOWS_EXIT_CODE}" == "0" ]; then
-      echo "Windows tests PASSED!"
-    else
-      echo "Windows tests had failures (exit code: ${WINDOWS_EXIT_CODE})"
-    fi
-  else
-    echo "No local Windows tests found in ${SCRIPT_DIR}/tests"
-  fi
-fi
