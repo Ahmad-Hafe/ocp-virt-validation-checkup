@@ -22,7 +22,7 @@ SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 GOLDEN_IMAGE_NAMESPACE="openshift-virtualization-os-images"
 
 # Default golden image name (can be overridden via WIN_IMAGE_NAME env var)
-# Users with existing Windows DataSource can skip the 60-90 min pipeline by setting WIN_IMAGE_NAME
+# Users with existing Windows DataSource can skip the pipeline (up to 2 hours) by setting WIN_IMAGE_NAME
 DEFAULT_WIN_GOLDEN_IMAGE_NAME="windows11-golden-image"
 GOLDEN_IMAGE_NAME="${WIN_IMAGE_NAME:-${DEFAULT_WIN_GOLDEN_IMAGE_NAME}}"
 
@@ -32,6 +32,12 @@ WIN_IMAGE_URL="${WIN_IMAGE_DOWNLOAD_URL:-${DEFAULT_WIN_IMAGE_URL}}"
 
 # Pipeline version for hub resolver (>=v4.21.0 means 4.21 or newer)
 PIPELINE_VERSION="${TEKTON_PIPELINE_VERSION:->=v4.21.0}"
+
+# Instance type for the Windows VM (can be overridden via WIN_INSTANCE_TYPE env var)
+# Default is d1.large (2 vCPUs, 8Gi RAM) which fits most clusters without hugepages
+# Use d1.xlarge (4 vCPUs, 16Gi RAM) or larger for better performance
+DEFAULT_INSTANCE_TYPE="d1.large"
+INSTANCE_TYPE="${WIN_INSTANCE_TYPE:-${DEFAULT_INSTANCE_TYPE}}"
 
 echo "=== Windows Golden Image Setup ==="
 
@@ -108,6 +114,7 @@ fi
 
 echo "Using storage class: ${STORAGE_CLASS}"
 echo "Using Windows ISO URL: ${WIN_IMAGE_URL}"
+echo "Using instance type: ${INSTANCE_TYPE}"
 
 # Step 7: Create and run the pipeline using hub resolver
 # The hub resolver automatically downloads the pipeline and tasks from artifacthub.io
@@ -150,7 +157,7 @@ spec:
     - name: baseDvNamespace
       value: "${GOLDEN_IMAGE_NAMESPACE}"
     - name: instanceTypeName
-      value: "u1.2xlarge"
+      value: "${INSTANCE_TYPE}"
     - name: instanceTypeKind
       value: "VirtualMachineClusterInstancetype"
     - name: preferenceName
@@ -170,9 +177,9 @@ echo "Created PipelineRun: ${PIPELINE_RUN_NAME}"
 
 # Step 8: Wait for pipeline to complete (with timeout)
 echo "Waiting for Windows installation to complete..."
-echo "This may take 60-90 minutes for first-time setup"
+echo "This may take up to 2 hours for first-time setup"
 
-TIMEOUT_SECONDS=7200  # 2 hours
+TIMEOUT_SECONDS=7200  # 2 hours (ISO download + Windows installation + sysprep)
 POLL_INTERVAL=60
 ELAPSED=0
 
