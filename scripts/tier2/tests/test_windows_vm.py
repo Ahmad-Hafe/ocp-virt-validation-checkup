@@ -102,6 +102,7 @@ spec:
     print(f"Cleaned up VM: {TEST_VM_NAME}")
 
 
+@pytest.mark.conformance
 @pytest.mark.windows
 def test_windows_vm_boots_from_golden_image(windows_vm):
     """
@@ -176,6 +177,7 @@ def test_windows_vm_boots_from_golden_image(windows_vm):
     pytest.fail("Guest agent did not connect within 10 minutes")
 
 
+@pytest.mark.conformance
 @pytest.mark.windows
 def test_golden_image_datasource_exists():
     """Verify the Windows golden image DataSource exists and is ready."""
