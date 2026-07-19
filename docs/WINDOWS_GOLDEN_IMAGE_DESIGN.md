@@ -24,17 +24,27 @@ To close this gap we need to give partners a way to create the Windows image on 
 
 As a storage partner running the self-validation tool, I want Windows tests included so that I can certify my storage without relying on Red Hat to run tests on my behalf.
 
-As a partner, I want to bring my own Windows image so that I can run Windows tests even if my cluster has no internet connection (disconnected environment).
+As a partner in a disconnected environment, I want to bring my own Windows image so that I can run Windows tests without internet access.
+
+As a cluster admin, I want the tool to clean up after itself so that test resources don't persist on my cluster after validation is complete.
 
 ## Goals
 
 - Windows test coverage in self-validation, no dependency on internal registries
 - Partners can create the image themselves via a [manifest](../manifests/windows/golden-image.yaml) (BYOI) or let the tool create it when the Microsoft EULA is accepted
 
-## Non-Goals
+---
 
-- Providing a pre-built Windows image or licence
-- Covering Windows test scenarios beyond what the current Tier-2/Tier-3 suite already has
+## Prerequisites
+
+**Both paths** require a storage class that supports clone or snapshot-based provisioning.
+
+**BYOI path** requires applying [`manifests/windows/golden-image.yaml`](../manifests/windows/golden-image.yaml) before running the tool.
+
+**Tool-managed path** requires:
+- [OpenShift Pipelines](https://docs.openshift.com/pipelines/latest/about/about-pipelines.html) operator installed on the cluster
+- `ACCEPT_WINDOWS_EULA=true` environment variable set
+- Internet access to download the Microsoft evaluation ISO (connected clusters only)
 
 ---
 
@@ -42,15 +52,15 @@ As a partner, I want to bring my own Windows image so that I can run Windows tes
 
 The [`windows-efi-installer`](https://artifacthub.io/packages/tekton-pipeline/redhat-pipelines/windows-efi-installer) Tekton pipeline creates a Windows Server 2022 image from a publicly available Microsoft evaluation ISO, runs an unattended install with our sysprep configuration (EFI, vTPM, SSH, guest agent, `Administrator`/`Administrator`), and stores the resulting disk as a DataSource in a `validation-os-images` namespace that tests can clone from.
 
-### Workflow: BYOI (Bring Your Own Image)
+### Approach 1: Partner creates the image
 
-The partner applies [`manifests/windows/golden-image.yaml`](../manifests/windows/golden-image.yaml) which creates the namespace, runs the pipeline, and sets up the DataSource. This also covers disconnected environments where the partner can provide a local ISO URL.
+The partner applies [`manifests/windows/golden-image.yaml`](../manifests/windows/golden-image.yaml) before running the tool. This creates the namespace, runs the pipeline, and sets up the DataSource. It also covers disconnected environments where the partner can provide a local ISO URL instead of downloading from Microsoft.
 
 When the tool starts it detects the existing DataSource and runs Windows tests. Since the partner created the resources, the tool does not touch them on cleanup.
 
-### Workflow: Tool-Managed
+### Approach 2: Tool creates the image automatically
 
-The partner sets `ACCEPT_WINDOWS_EULA=true` and the tool creates the namespace (labeled `app=ocp-virt-validation`), runs the pipeline, executes the tests, and deletes the namespace when done.
+The partner sets `ACCEPT_WINDOWS_EULA=true` and the tool takes care of everything: it creates the namespace (labeled `app=ocp-virt-validation`), runs the pipeline, executes the tests, and deletes the namespace when done.
 
 ### Flow
 
@@ -124,17 +134,6 @@ graph TB
     style U2 fill:#cce5ff,stroke:#004085
     style P fill:#e2d5f1,stroke:#6f42c1
 ```
-
-### Prerequisites
-
-**Both paths** require a storage class that supports clone or snapshot-based provisioning.
-
-**BYOI path** requires applying [`manifests/windows/golden-image.yaml`](../manifests/windows/golden-image.yaml) before running the tool.
-
-**Tool-managed path** requires:
-- [OpenShift Pipelines](https://docs.openshift.com/pipelines/latest/about/about-pipelines.html) operator installed on the cluster
-- `ACCEPT_WINDOWS_EULA=true` environment variable set
-- Internet access to download the Microsoft evaluation ISO (connected clusters only)
 
 ### Cleanup
 
