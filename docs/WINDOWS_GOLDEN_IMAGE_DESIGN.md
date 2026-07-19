@@ -16,9 +16,7 @@ Adds Windows Server 2022 test coverage to the self-validation tool by creating a
 
 ## Motivation
 
-The [epic](https://redhat.atlassian.net/browse/CNV-84717) goal is to let cloud providers do the necessary verification of OpenShift Virtualization on their side, with minimal or no help from Red Hat. We don't provide a Windows licence or image to cloud providers, and the existing Tier-2/Tier-3 Windows tests depend on images stored in internal Artifactory and private Quay registries that are not accessible outside Red Hat.
-
-To close this gap we need to give partners a way to create the Windows image on their own cluster using a publicly available source, while respecting Microsoft's EULA requirements.
+Partners need to run Windows tests as part of storage certification, but we can't ship them a Windows image. The existing tests pull from internal Artifactory and Quay registries that are inaccessible outside Red Hat. This feature lets partners create the image on their own cluster from a public Microsoft ISO.
 
 ### User Stories
 
