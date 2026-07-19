@@ -116,7 +116,7 @@ graph TB
     subgraph "Cluster Resources"
         NS["Namespace: validation-os-images"]
         DS["DataSource: win2k22"]
-        PVC["PVC: win2k22 (64Gi)"]
+        PVC["PVC: win2k22"]
     end
 
     subgraph "Tests"
@@ -173,7 +173,7 @@ Windows tests run as part of the `tier2` suite and can be targeted individually 
 
 **Microsoft evaluation ISO URL changes**. The ISO download URL is configurable via `WIN_IMAGE_DOWNLOAD_URL` so partners can point to a mirror or a different version without code changes.
 
-**Pipeline takes too long on slow storage**. The golden image build involves ~20 GB download and sysprep, which can take over an hour on some cloud storage classes. The pipeline timeout is configurable.
+**Pipeline takes too long on slow storage**. The golden image build involves ~20 GB download and sysprep, which can take over an hour on some cloud storage classes.
 
 ---
 
