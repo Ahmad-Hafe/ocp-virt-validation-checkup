@@ -16,15 +16,13 @@ Adds Windows Server 2022 test coverage to the self-validation tool by creating a
 
 ## Motivation
 
-Partners need to run Windows tests as part of storage certification, but we can't ship them a Windows image. The existing tests pull from internal Artifactory and Quay registries that are inaccessible outside Red Hat. This feature lets partners create the image on their own cluster from a public Microsoft ISO.
+We don't provide a Windows licence or image to partners. This feature lets them create the image on their own cluster so they can run Windows tests as part of storage certification.
 
 ### User Stories
 
 As a storage partner running the self-validation tool, I want Windows tests included so that I can certify my storage without relying on Red Hat to run tests on my behalf.
 
 As a partner in a disconnected environment, I want to bring my own Windows image so that I can run Windows tests without internet access.
-
-As a cluster admin, I want the tool to clean up after itself so that test resources don't persist on my cluster after validation is complete.
 
 ## Goals
 
