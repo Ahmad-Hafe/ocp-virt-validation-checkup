@@ -24,9 +24,7 @@ To close this gap we need to give partners a way to create the Windows image on 
 
 As a storage partner running the self-validation tool, I want Windows tests included so that I can certify my storage without relying on Red Hat to run tests on my behalf.
 
-As a partner in a disconnected environment, I want to bring my own Windows image so that I can run Windows tests without internet access.
-
-As a cluster admin, I want the tool to clean up after itself so that test resources don't persist on my cluster after validation is complete.
+As a partner, I want to bring my own Windows image so that I can run Windows tests even if my cluster has no internet connection (disconnected environment).
 
 ## Goals
 
@@ -37,19 +35,6 @@ As a cluster admin, I want the tool to clean up after itself so that test resour
 
 - Providing a pre-built Windows image or licence
 - Covering Windows test scenarios beyond what the current Tier-2/Tier-3 suite already has
-
----
-
-## Prerequisites
-
-**Both paths** require a storage class that supports clone or snapshot-based provisioning.
-
-**BYOI path** requires applying [`manifests/windows/golden-image.yaml`](../manifests/windows/golden-image.yaml) before running the tool.
-
-**Tool-managed path** requires:
-- [OpenShift Pipelines](https://docs.openshift.com/pipelines/latest/about/about-pipelines.html) operator installed on the cluster
-- `ACCEPT_WINDOWS_EULA=true` environment variable set
-- Internet access to download the Microsoft evaluation ISO (connected clusters only)
 
 ---
 
@@ -139,6 +124,17 @@ graph TB
     style U2 fill:#cce5ff,stroke:#004085
     style P fill:#e2d5f1,stroke:#6f42c1
 ```
+
+### Prerequisites
+
+**Both paths** require a storage class that supports clone or snapshot-based provisioning.
+
+**BYOI path** requires applying [`manifests/windows/golden-image.yaml`](../manifests/windows/golden-image.yaml) before running the tool.
+
+**Tool-managed path** requires:
+- [OpenShift Pipelines](https://docs.openshift.com/pipelines/latest/about/about-pipelines.html) operator installed on the cluster
+- `ACCEPT_WINDOWS_EULA=true` environment variable set
+- Internet access to download the Microsoft evaluation ISO (connected clusters only)
 
 ### Cleanup
 
