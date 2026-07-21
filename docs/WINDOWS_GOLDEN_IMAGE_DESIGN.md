@@ -11,17 +11,17 @@
 
 ## Summary
 
-Adds Windows Server 2022 test coverage to the self-validation tool by creating a golden image on-cluster using a [Tekton pipeline](https://artifacthub.io/packages/tekton-pipeline/redhat-pipelines/windows-efi-installer).
+Adds Windows Server 2022 test coverage to the self-validation tool, by creating a golden image on-cluster using a [Tekton pipeline](https://artifacthub.io/packages/tekton-pipeline/redhat-pipelines/windows-efi-installer).
 
 ## Motivation
 
-We don't provide a Windows licence or image to partners, so this feature lets them create the image on their own cluster and run Windows tests as part of storage certification.
+We don't provide a Windows licence or image to partners, so this feature lets them create the image on their own cluster, and run Windows tests as part of storage certification.
 
 ### User Stories
 
-As a storage partner running the self-validation tool, I want Windows tests included so that I can certify my storage without relying on Red Hat to run tests on my behalf.
+As a storage partner running the self-validation tool, I want Windows tests included so I can certify my storage without relying on Red Hat to run tests on my behalf.
 
-As a partner, I want to bring my own Windows image so that I can run Windows tests even if my cluster has no internet access (disconnected environment).
+As a partner, I want to bring my own Windows image so I can run Windows tests even if my cluster has no internet access (disconnected environment).
 
 ## Goals
 
@@ -30,13 +30,19 @@ As a partner, I want to bring my own Windows image so that I can run Windows tes
 
 ---
 
+## Prerequisites
+
+Both paths require a storage class that supports clone / snapshot-based provisioning, if not specified the cluster default is used. [OpenShift Pipelines](https://docs.openshift.com/pipelines/latest/about/about-pipelines.html) must be installed on the cluster.
+
+---
+
 ## How It Works
 
-The partner either **brings their own image** or **lets the tool create one**. If neither is done, Windows tests are skipped.
+The partner either **brings their own image** or **lets the tool create one**, if neither is done Windows tests are skipped.
 
-**Bring your own image** — Apply the provided [manifest](../manifests/windows/golden-image.yaml) before running the tool. The manifest can build the image from ISO using a Tekton pipeline, or import an existing image from an HTTP URL, a container registry, or an existing PVC. The tool detects the image, runs Windows tests, and never touches the partner's resources.
+**Bring your own image** — apply the provided [manifest](../manifests/windows/golden-image.yaml) before running the tool, the manifest can build the image from ISO using a Tekton pipeline, or import an existing image from an HTTP URL, a container registry, or an existing PVC. The tool detects the image, runs Windows tests, and never touches the partner's resources.
 
-**Let the tool create it** — Set `ACCEPT_WINDOWS_EULA=true`. The tool builds the image from ISO via a Tekton pipeline, runs the tests, and cleans up everything when done. Requires [OpenShift Pipelines](https://docs.openshift.com/pipelines/latest/about/about-pipelines.html) and internet access.
+**Let the tool create it** — set `ACCEPT_WINDOWS_EULA=true` and the tool builds the image from ISO via a Tekton pipeline, runs the tests, and cleans up everything when done.
 
 ```mermaid
 flowchart TD
@@ -53,7 +59,7 @@ flowchart TD
 
 ## Cleanup
 
-The rule is simple: **the tool only deletes what it created**.
+**The tool only deletes what it created.**
 
 | Who created the image? | What happens on cleanup? |
 |------------------------|--------------------------|
@@ -66,9 +72,9 @@ The rule is simple: **the tool only deletes what it created**.
 
 | Risk | Mitigation |
 |------|------------|
-| OpenShift Pipelines not installed | Windows tests are skipped with a clear message. Partners can bring their own image instead. |
+| OpenShift Pipelines not installed | Windows tests are skipped with a clear message, partners can bring their own image instead |
 | Microsoft ISO URL changes | The URL is configurable via `WIN_IMAGE_DOWNLOAD_URL` |
-| Pipeline is slow on some storage | The build involves ~20 GB and can take 30–60 min depending on storage performance |
+| Pipeline is slow on some storage | The build involves ~20 GB, can take 30–60 min depending on storage performance |
 
 ---
 
