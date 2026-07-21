@@ -34,7 +34,7 @@ As a partner, I want to bring my own Windows image so that I can run Windows tes
 
 The partner either **brings their own image** or **lets the tool create one**. If neither is done, Windows tests are skipped.
 
-**Bring your own image** — Apply the provided [manifest](../manifests/windows/golden-image.yaml) before running the tool. The tool detects the image, runs Windows tests, and never touches the partner's resources.
+**Bring your own image** — Apply the provided [manifest](../manifests/windows/golden-image.yaml) before running the tool. The manifest can build the image from ISO using a Tekton pipeline, or import an existing image from an HTTP URL, a container registry, or an existing PVC. The tool detects the image, runs Windows tests, and never touches the partner's resources.
 
 **Let the tool create it** — Set `ACCEPT_WINDOWS_EULA=true`. The tool builds the image from ISO via a Tekton pipeline, runs the tests, and cleans up everything when done. Requires [OpenShift Pipelines](https://docs.openshift.com/pipelines/latest/about/about-pipelines.html) and internet access.
 
