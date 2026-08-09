@@ -34,6 +34,8 @@ As a partner, I want to bring my own Windows image so I can run Windows tests ev
 
 Both paths require a storage class that supports clone / snapshot-based provisioning, if not specified the cluster default is used. [OpenShift Pipelines](https://docs.openshift.com/pipelines/latest/about/about-pipelines.html) must be installed on the cluster.
 
+**Disconnected clusters:** The Tekton pipeline is fetched from [Artifact Hub](https://artifacthub.io/packages/tekton-pipeline/redhat-pipelines/windows-efi-installer) at runtime, which requires internet. On disconnected clusters, install the pipeline and tasks into the namespace before running the tool — see [`disconnected/README.md`](../disconnected/README.md).
+
 ---
 
 ## How It Works
@@ -78,6 +80,7 @@ flowchart TD
 
 ---
 
-## Feature PR
+## Related PRs
 
-[#87](https://github.com/openshift-cnv/ocp-virt-validation-checkup/pull/87)
+- [#87](https://github.com/openshift-cnv/ocp-virt-validation-checkup/pull/87) — Windows golden image feature
+- [#100](https://github.com/openshift-cnv/ocp-virt-validation-checkup/pull/100) — Disconnected environment fixes + OpenSSH fallback
