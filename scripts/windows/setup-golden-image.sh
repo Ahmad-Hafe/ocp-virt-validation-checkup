@@ -674,10 +674,10 @@ run_pipeline() {
     echo "Created PipelineRun: ${PIPELINE_RUN_NAME}"
     echo "Waiting for Windows installation to complete (this may take up to 3 hours)..."
 
+    # Capture status directly: `if ! cmd; then status=$?; fi` always yields 0
+    # because $? reflects the successful negation, not cmd's failure status.
     local WAIT_STATUS=0
-    if ! wait_for_pipelinerun "${PIPELINE_RUN_NAME}" "${MAX_HUB_ATTEMPTS}" "${TIMEOUT_SECONDS}" "${attempt}"; then
-      WAIT_STATUS=$?
-    fi
+    wait_for_pipelinerun "${PIPELINE_RUN_NAME}" "${MAX_HUB_ATTEMPTS}" "${TIMEOUT_SECONDS}" "${attempt}" || WAIT_STATUS=$?
 
     case ${WAIT_STATUS} in
       0)
