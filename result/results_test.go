@@ -243,6 +243,51 @@ func TestSetupFailureWithOtherValidSuites(t *testing.T) {
 	}
 }
 
+func TestFailedTestsJSONAlwaysFlatWithCategoryField(t *testing.T) {
+	junitResults := map[string]junit.TestSuite{
+		"tier2": {
+			Tests:    3,
+			Failures: 2,
+			TestCases: []junit.TestCase{
+				{Name: "test_hotplug", Classname: "tests.storage.test_hotplug.TestHotPlug", Failure: true},
+				{Name: "test_smbios", Classname: "tests.virt.cluster.general.test_smbios", Failure: true},
+				{Name: "test_ok", Classname: "tests.virt.node.test_node"},
+			},
+		},
+	}
+
+	res := result.New(junitResults)
+	data, err := json.Marshal(res)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var decoded map[string]json.RawMessage
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal root: %v", err)
+	}
+	var tier2 map[string]json.RawMessage
+	if err := json.Unmarshal(decoded["tier2"], &tier2); err != nil {
+		t.Fatalf("unmarshal tier2: %v", err)
+	}
+
+	var failedTests []string
+	if err := json.Unmarshal(tier2["failed_tests"], &failedTests); err != nil {
+		t.Fatalf("failed_tests must be a JSON array, got %s: %v", string(tier2["failed_tests"]), err)
+	}
+	if len(failedTests) != 2 {
+		t.Fatalf("expected 2 flat failed tests, got %v", failedTests)
+	}
+
+	var byCat map[string][]string
+	if err := json.Unmarshal(tier2["failed_tests_by_category"], &byCat); err != nil {
+		t.Fatalf("failed_tests_by_category missing/invalid: %v", err)
+	}
+	if len(byCat["storage"]) != 1 || byCat["storage"][0] != "test_hotplug" {
+		t.Fatalf("unexpected storage category: %v", byCat)
+	}
+}
+
 func TestCategorizesFailedTestsByClassname(t *testing.T) {
 	junitResults := map[string]junit.TestSuite{
 		"tier2": {
@@ -373,11 +418,19 @@ func TestCategorizedJSONOutputUsesMap(t *testing.T) {
 	}
 
 	jsonStr := string(jsonData)
+	// failed_tests must remain a flat array for ConfigMap consumers.
+	if !strings.Contains(jsonStr, `"failed_tests":["test_hotplug","test_smbios"]`) &&
+		!strings.Contains(jsonStr, `"failed_tests":["test_smbios","test_hotplug"]`) {
+		t.Errorf("expected flat failed_tests array, got %s", jsonStr)
+	}
+	if !strings.Contains(jsonStr, `"failed_tests_by_category"`) {
+		t.Errorf("expected failed_tests_by_category field, got %s", jsonStr)
+	}
 	if !strings.Contains(jsonStr, `"storage":["test_hotplug"]`) {
-		t.Errorf("expected JSON to contain categorized storage tests, got %s", jsonStr)
+		t.Errorf("expected categorized storage tests under failed_tests_by_category, got %s", jsonStr)
 	}
 	if !strings.Contains(jsonStr, `"virt/cluster":["test_smbios"]`) {
-		t.Errorf("expected JSON to contain categorized virt/cluster tests, got %s", jsonStr)
+		t.Errorf("expected categorized virt/cluster tests under failed_tests_by_category, got %s", jsonStr)
 	}
 }
 

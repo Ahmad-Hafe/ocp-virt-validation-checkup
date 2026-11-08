@@ -190,7 +190,18 @@ cleanup_windows_resources() {
     if [ "${ACCEPT_WINDOWS_EULA}" != "true" ]; then
         return
     fi
-    cleanup_golden_image_resources "${GOLDEN_IMAGE_NAMESPACE}"
+    # Prefer ownership recorded by setup-golden-image.sh for this run.
+    CREATED_GOLDEN_NAMESPACE=""
+    if [ -n "${RESULTS_DIR}" ] && [ -f "${RESULTS_DIR}/.windows_setup_state" ]; then
+        # shellcheck disable=SC1090
+        source "${RESULTS_DIR}/.windows_setup_state"
+    fi
+    if [ "${CREATED_GOLDEN_NAMESPACE}" == "true" ]; then
+        cleanup_golden_image_resources "${GOLDEN_IMAGE_NAMESPACE}"
+    else
+        echo "Skipping full Windows namespace delete (namespace was not created by this run)."
+        cleanup_golden_image_resources "${GOLDEN_IMAGE_NAMESPACE}" selective
+    fi
 }
 
 # Function to cleanup progress watcher and forward signals
@@ -412,25 +423,35 @@ readonly EXIT_WINDOWS_SKIP=2
 
 WINDOWS_SETUP_SCRIPT="${SCRIPT_DIR}/windows/setup-golden-image.sh"
 if [ -f "${WINDOWS_SETUP_SCRIPT}" ]; then
-  export STORAGE_CLASS
-  export WIN_IMAGE_DOWNLOAD_URL
-  export TEKTON_PIPELINE_VERSION
-  export ACCEPT_WINDOWS_EULA
-  WINDOWS_SETUP_EXIT=0
-  bash "${WINDOWS_SETUP_SCRIPT}" || WINDOWS_SETUP_EXIT=$?
-  case ${WINDOWS_SETUP_EXIT} in
-    0)
-      ;;
-    "${EXIT_WINDOWS_SKIP}")
-      echo "WARNING: Windows golden image setup skipped (missing prerequisite). Windows tests will be skipped."
-      echo "All other test suites will continue normally."
-      unset ACCEPT_WINDOWS_EULA
-      ;;
-    *)
-      echo "ERROR: Windows golden image setup failed (exit ${WINDOWS_SETUP_EXIT}). Aborting validation."
-      exit 1
-      ;;
-  esac
+  # Tool-managed image creation is expensive (1-3h). Skip it for dry-runs and when
+  # tier2 (the only suite that runs Windows tests) is not selected. Existing Ready
+  # DataSources (BYOI / prior runs) are still detected by tier2 itself.
+  if [ "${DRY_RUN}" == "true" ]; then
+    echo "Skipping Windows golden image setup (DRY_RUN=true)."
+  elif ! suite_enabled "tier2"; then
+    echo "Skipping Windows golden image setup (tier2 suite not selected)."
+  else
+    export STORAGE_CLASS
+    export WIN_IMAGE_DOWNLOAD_URL
+    export TEKTON_PIPELINE_VERSION
+    export ACCEPT_WINDOWS_EULA
+    export RESULTS_DIR
+    WINDOWS_SETUP_EXIT=0
+    bash "${WINDOWS_SETUP_SCRIPT}" || WINDOWS_SETUP_EXIT=$?
+    case ${WINDOWS_SETUP_EXIT} in
+      0)
+        ;;
+      "${EXIT_WINDOWS_SKIP}")
+        echo "WARNING: Windows golden image setup skipped (missing prerequisite). Windows tests will be skipped."
+        echo "All other test suites will continue normally."
+        unset ACCEPT_WINDOWS_EULA
+        ;;
+      *)
+        echo "ERROR: Windows golden image setup failed (exit ${WINDOWS_SETUP_EXIT}). Aborting validation."
+        exit 1
+        ;;
+    esac
+  fi
 fi
 
 # Start progress watcher in background AFTER storage config is set

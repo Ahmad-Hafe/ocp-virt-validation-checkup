@@ -42,7 +42,7 @@ readonly EXIT_WINDOWS_SKIP=2
 DEFAULT_WIN_IMAGE_URL="https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_en-us.iso"
 WIN_IMAGE_URL="${WIN_IMAGE_DOWNLOAD_URL:-${DEFAULT_WIN_IMAGE_URL}}"
 
-PIPELINE_VERSION="${TEKTON_PIPELINE_VERSION:->=v4.21.0}"
+PIPELINE_VERSION="${TEKTON_PIPELINE_VERSION:-v4.21.0}"
 
 DEFAULT_INSTANCE_TYPE="u1.large"
 INSTANCE_TYPE="${WIN_INSTANCE_TYPE:-${DEFAULT_INSTANCE_TYPE}}"
@@ -86,11 +86,20 @@ cleanup_pipeline_sa() {
 }
 
 cleanup_autounattend_cm() {
+  # Only delete ConfigMaps this run created — never remove a customer's BYOI file.
+  if [ "${CREATED_AUTOUNATTEND_CM}" != "true" ]; then
+    return
+  fi
   oc delete configmap "${AUTOUNATTEND_CM_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" 2>/dev/null || true
 }
 
 cleanup_namespace() {
-  cleanup_golden_image_resources "${GOLDEN_IMAGE_NAMESPACE}"
+  if [ "${CREATED_NAMESPACE}" == "true" ]; then
+    cleanup_golden_image_resources "${GOLDEN_IMAGE_NAMESPACE}"
+  else
+    echo "Namespace was not created by this run — cleaning up labeled resources only."
+    cleanup_golden_image_resources "${GOLDEN_IMAGE_NAMESPACE}" selective
+  fi
 }
 
 # Deletes MSI server resources we created. Requires either CREATED_MSI_SERVER=true
@@ -641,6 +650,7 @@ run_pipeline() {
   fi
 
   create_autounattend_configmap
+  CREATED_AUTOUNATTEND_CM=true
 
   echo ""
   echo "=== Running Windows Server 2022 Installation Pipeline ==="
@@ -1126,6 +1136,21 @@ echo "Microsoft EULA accepted by user"
 # Exit ${EXIT_WINDOWS_SKIP} (prerequisite missing) is a routine skip — skip the dump.
 CREATED_PIPELINE_SA=false
 CREATED_MSI_SERVER=false
+CREATED_AUTOUNATTEND_CM=false
+CREATED_NAMESPACE=false
+
+write_windows_setup_state() {
+  # Persist ownership for entrypoint cleanup after this script exits.
+  if [ -z "${RESULTS_DIR}" ]; then
+    return
+  fi
+  mkdir -p "${RESULTS_DIR}"
+  cat > "${RESULTS_DIR}/.windows_setup_state" <<STATE_EOF
+CREATED_GOLDEN_NAMESPACE=${CREATED_NAMESPACE}
+GOLDEN_IMAGE_NAMESPACE=${GOLDEN_IMAGE_NAMESPACE}
+STATE_EOF
+}
+
 trap 'exit_code=$?; [ $exit_code -ne 0 ] && [ $exit_code -ne '"${EXIT_WINDOWS_SKIP}"' ] && dump_windows_debug_info; cleanup_pipeline_sa; cleanup_autounattend_cm; cleanup_msi_server; if [ $exit_code -ne 0 ]; then cleanup_namespace; fi' EXIT
 
 echo "Checking if OpenShift Pipelines operator is installed..."
@@ -1149,6 +1174,8 @@ if ! oc get namespace "${GOLDEN_IMAGE_NAMESPACE}" &>/dev/null; then
   echo "Creating namespace ${GOLDEN_IMAGE_NAMESPACE}..."
   oc create namespace "${GOLDEN_IMAGE_NAMESPACE}"
   oc label namespace "${GOLDEN_IMAGE_NAMESPACE}" app=ocp-virt-validation --overwrite
+  CREATED_NAMESPACE=true
+  write_windows_setup_state
 else
   echo "Namespace ${GOLDEN_IMAGE_NAMESPACE} already exists"
   NS_LABEL=$(oc get namespace "${GOLDEN_IMAGE_NAMESPACE}" -o jsonpath='{.metadata.labels.app}' 2>/dev/null || echo "")
@@ -1161,6 +1188,7 @@ else
     echo "  - Delete the namespace before using ACCEPT_WINDOWS_EULA=true"
     exit 1
   fi
+  write_windows_setup_state
 fi
 
 oc label namespace "${GOLDEN_IMAGE_NAMESPACE}" pod-security.kubernetes.io/enforce=privileged --overwrite

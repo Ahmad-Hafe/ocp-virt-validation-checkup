@@ -340,10 +340,10 @@ if [ "${DRY_RUN}" == "true" ]; then
     echo "0" > "${ARTIFACTS}/.exit_code"
   fi
 
-  # Generate JUnit XML from collected test IDs, accounting for TEST_SKIPS
-  # Overwrite .exit_code after successful JUnit generation so junit_parser
-  # does not flag the suite as a setup failure when pytest --collect-only
-  # exits non-zero (e.g. import warnings in CI or no tests collected).
+  # Generate JUnit XML from collected test IDs, accounting for TEST_SKIPS.
+  # Do NOT overwrite pytest's exit status just because JUnit was written —
+  # the generator may still produce XML after a collection/import failure.
+  # Exit 5 (no tests matched an explicit filter) is already normalized above.
   .venv/bin/python -c "
 import re, subprocess, sys, socket
 from xml.etree.ElementTree import Element, SubElement, ElementTree
@@ -408,10 +408,6 @@ tree = ElementTree(testsuites)
 tree.write(junit_path, xml_declaration=True, encoding='unicode')
 print(f'Generated JUnit XML with {total_tests} test(s) ({len(test_ids)} collected, {skipped_count} skipped)')
 " "${ARTIFACTS}/tier2-log.txt" "${ARTIFACTS}/junit.results.xml" "${TEST_SKIPS:-}" "${TEST_FOCUS:-}"
-
-  if [ -f "${ARTIFACTS}/junit.results.xml" ]; then
-    echo 0 > "${ARTIFACTS}/.exit_code"
-  fi
 
 else
   rm -f "${ARTIFACTS}/.exit_code"

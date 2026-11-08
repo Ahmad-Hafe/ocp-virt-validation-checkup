@@ -82,6 +82,10 @@ func New(junitResults map[string]junit.TestSuite) Result {
 			}
 
 			sigRes.FailedTests = failedTests
+			// Keep failed_tests JSON as a flat list; publish categories separately.
+			if !FailedTestsMap(failedTests).isFlat() {
+				sigRes.FailedTestsByCategory = failedTests
+			}
 		}
 
 		res.SigMap[sig] = sigRes
@@ -99,26 +103,43 @@ type SigMap map[string]Sig
 
 // Sig represents the result of a test suite, including the number of tests run, passed, failed, and skipped.
 type Sig struct {
-	Run         int            `json:"tests_run"`
-	Passed      int            `json:"tests_passed"`
-	Failures    int            `json:"tests_failures"`
-	Skipped     int            `json:"tests_skipped"`
-	Duration    string         `json:"tests_duration,omitempty"`
-	FailedTests FailedTestsMap `json:"failed_tests,omitempty"`
+	Run                   int                 `json:"tests_run"`
+	Passed                int                 `json:"tests_passed"`
+	Failures              int                 `json:"tests_failures"`
+	Skipped               int                 `json:"tests_skipped"`
+	Duration              string              `json:"tests_duration,omitempty"`
+	FailedTests           FailedTestsMap      `json:"failed_tests,omitempty"`
+	FailedTestsByCategory map[string][]string `json:"failed_tests_by_category,omitempty"`
 }
 
 // FailedTestsMap holds failed test names grouped by category.
 // An empty-string key means the test has no category (e.g. Ginkgo suites).
-// JSON/YAML: serialises as a flat []string when there is only the
-// uncategorised bucket, and as map[string][]string otherwise, so that
-// existing consumers of the ConfigMap are not broken by this change.
+// JSON/YAML: always serialises failed_tests as a flat []string so ConfigMap
+// consumers keep a stable sequence shape. Categorised grouping is exposed
+// separately via failed_tests_by_category when categories are present.
 type FailedTestsMap map[string][]string
 
 func (f FailedTestsMap) MarshalJSON() ([]byte, error) {
-	if f.isFlat() {
-		return json.Marshal(f[""])
+	return json.Marshal(f.flatten())
+}
+
+func (f FailedTestsMap) flatten() []string {
+	if len(f) == 0 {
+		return nil
 	}
-	return json.Marshal(map[string][]string(f))
+	if f.isFlat() {
+		return append([]string(nil), f[""]...)
+	}
+	categories := make([]string, 0, len(f))
+	for cat := range f {
+		categories = append(categories, cat)
+	}
+	sort.Strings(categories)
+	out := make([]string, 0)
+	for _, cat := range categories {
+		out = append(out, f[cat]...)
+	}
+	return out
 }
 
 func (f *FailedTestsMap) UnmarshalJSON(data []byte) error {
