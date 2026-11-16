@@ -133,9 +133,31 @@ func readTestSuite(reader io.Reader) (TestSuite, error) {
 		return TestSuite{}, err
 	}
 
-	if len(testSuites.TestSuites) == 0 {
-		return TestSuite{}, nil
+	return aggregateTestSuites(testSuites.TestSuites), nil
+}
+
+// aggregateTestSuites merges every child suite into one summary suite so
+// multi-phase JUnit reports (e.g. path + Windows) keep all cases and counts.
+func aggregateTestSuites(suites []TestSuite) TestSuite {
+	if len(suites) == 0 {
+		return TestSuite{}
+	}
+	if len(suites) == 1 {
+		return suites[0]
 	}
 
-	return testSuites.TestSuites[0], nil
+	out := TestSuite{Name: suites[0].Name}
+	for _, suite := range suites {
+		out.Tests += suite.Tests
+		out.Failures += suite.Failures
+		out.Errors += suite.Errors
+		out.Skipped += suite.Skipped
+		out.Disabled += suite.Disabled
+		out.Time += suite.Time
+		out.TestCases = append(out.TestCases, suite.TestCases...)
+		if suite.SetupFailure {
+			out.SetupFailure = true
+		}
+	}
+	return out
 }

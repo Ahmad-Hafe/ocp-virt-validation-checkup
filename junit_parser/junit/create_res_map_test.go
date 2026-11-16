@@ -3,8 +3,52 @@ package junit
 import (
 	"os"
 	"path"
+	"strings"
 	"testing"
 )
+
+func TestReadTestSuiteAggregatesMultipleSuites(t *testing.T) {
+	xmlContent := `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="3" failures="1" errors="0" skipped="0">
+  <testsuite name="pytest" tests="1" failures="0" errors="0" skipped="0" time="0.100">
+    <testcase classname="tests.storage.test_a" name="test_path" time="0.100"/>
+  </testsuite>
+  <testsuite name="pytest-windows" tests="2" failures="1" errors="0" skipped="0" time="0.200">
+    <testcase classname="tests.virt.test_b" name="test_win_ok" time="0.100"/>
+    <testcase classname="tests.virt.test_c" name="test_win_fail" time="0.100">
+      <failure>windows failed</failure>
+    </testcase>
+  </testsuite>
+</testsuites>`
+
+	suite, err := readTestSuite(strings.NewReader(xmlContent))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if suite.Tests != 3 {
+		t.Errorf("expected 3 tests, got %d", suite.Tests)
+	}
+	if suite.Failures != 1 {
+		t.Errorf("expected 1 failure, got %d", suite.Failures)
+	}
+	if len(suite.TestCases) != 3 {
+		t.Errorf("expected 3 test cases, got %d", len(suite.TestCases))
+	}
+
+	names := map[string]bool{}
+	for _, tc := range suite.TestCases {
+		names[tc.Name] = true
+	}
+	for _, want := range []string{"test_path", "test_win_ok", "test_win_fail"} {
+		if !names[want] {
+			t.Errorf("expected test case %q in aggregated suite", want)
+		}
+	}
+	if !suite.TestCases[2].Failure {
+		t.Errorf("expected Windows failure case to retain <failure>")
+	}
+}
 
 func generateResDir(t *testing.T, files map[string]string) string {
 	t.Helper()

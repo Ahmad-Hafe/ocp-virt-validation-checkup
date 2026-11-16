@@ -535,7 +535,9 @@ print(f'Generated JUnit XML with {total_tests} test(s) ({len(test_ids)} collecte
   fi
 
   # Second phase: cross-module Windows collect for mixed path+Windows selections.
-  if [ "${TIER2_SPLIT_WINDOWS}" == "true" ] && [ "$(cat "${ARTIFACTS}/.exit_code" 2>/dev/null || echo 1)" == "0" ]; then
+  # Run even if phase 1 failed so Windows coverage still appears in the report.
+  if [ "${TIER2_SPLIT_WINDOWS}" == "true" ]; then
+    PHASE1_EXIT=$(cat "${ARTIFACTS}/.exit_code" 2>/dev/null || echo "1")
     echo "Collecting cross-module Windows tests (dry-run phase 2)..."
     rm -f "${ARTIFACTS}/.exit_code_windows"
     (set +e; .venv/bin/pytest \
@@ -557,12 +559,11 @@ print(f'Generated JUnit XML with {total_tests} test(s) ({len(test_ids)} collecte
     wait_for_pytest_pipeline "${TEST_PID}" "${ARTIFACTS}/.exit_code_windows"
     cat "${ARTIFACTS}/tier2-windows-log.txt" >> "${ARTIFACTS}/tier2-log.txt"
     WIN_EXIT=$(cat "${ARTIFACTS}/.exit_code_windows" 2>/dev/null || echo "0")
+    # Exit 5 (no tests collected) is success only with an explicit focus/skip filter.
     if [ "${WIN_EXIT}" == "5" ] && [ "${TIER2_SELECTIVE_FILTER}" == "true" ]; then
       WIN_EXIT=0
     fi
-    if [ "${WIN_EXIT}" != "0" ] && [ "${WIN_EXIT}" != "5" ]; then
-      echo "${WIN_EXIT}" > "${ARTIFACTS}/.exit_code"
-    else
+    if [ "${WIN_EXIT}" == "0" ]; then
       .venv/bin/python -c "
 import sys, socket
 from xml.etree.ElementTree import Element, SubElement, ElementTree
@@ -591,7 +592,16 @@ print(f'Generated Windows dry-run JUnit with {len(test_ids)} test(s)')
 " "${ARTIFACTS}/tier2-windows-log.txt" "${ARTIFACTS}/junit.windows.xml"
       if [ -f "${ARTIFACTS}/junit.results.xml" ] && [ -f "${ARTIFACTS}/junit.windows.xml" ]; then
         merge_junit_files "${ARTIFACTS}/junit.results.xml" "${ARTIFACTS}/junit.windows.xml" "${ARTIFACTS}/junit.results.xml"
+      elif [ -f "${ARTIFACTS}/junit.windows.xml" ]; then
+        cp "${ARTIFACTS}/junit.windows.xml" "${ARTIFACTS}/junit.results.xml"
       fi
+    fi
+    if [ "${PHASE1_EXIT}" != "0" ]; then
+      echo "${PHASE1_EXIT}" > "${ARTIFACTS}/.exit_code"
+    elif [ "${WIN_EXIT}" != "0" ]; then
+      echo "${WIN_EXIT}" > "${ARTIFACTS}/.exit_code"
+    else
+      echo 0 > "${ARTIFACTS}/.exit_code"
     fi
   fi
 
@@ -704,44 +714,51 @@ if matched:
   fi
 
   # Second phase: cross-module Windows for mixed path+Windows selections.
+  # Always run after phase 1 (including ordinary test failures) so Windows
+  # coverage is not lost; combine statuses and merge available JUnit files.
   if [ "${TIER2_SPLIT_WINDOWS}" == "true" ]; then
-    TIER2_EXIT=$(cat "${ARTIFACTS}/.exit_code" 2>/dev/null || echo "1")
-    if [ "${TIER2_EXIT}" == "0" ]; then
-      echo "Running cross-module Windows tests (phase 2)..."
-      rm -f "${ARTIFACTS}/.exit_code_windows"
-      (set +e; .venv/bin/pytest \
-        -m "conformance and windows" \
-        --skip-artifactory-check \
-        --latest-rhel \
-        --tc=hco_subscription:${SUBSCRIPTION_NAME} \
-        --conformance-storage-class=${STORAGE_CLASS} \
-        --tc=storage_class_a:${STORAGE_CLASS} \
-        --tc=storage_class_b:${STORAGE_CLASS} \
-        ${STORAGE_CLASS_CONFIG} \
-        ${HCP_FLAG} \
-        ${OS_LOGIN_FLAG} \
-        ${WIN_IMAGE_FLAG} \
-        -s -o log_cli=true \
-        "${K_ARGS[@]}" \
-        --data-collector \
-        --data-collector-output-dir=${ARTIFACTS} \
-        --pytest-log-file=${ARTIFACTS}/pytest-windows-logs.txt \
-        --junitxml="${ARTIFACTS}/junit.windows.xml"; echo $? > "${ARTIFACTS}/.exit_code_windows") 2>&1 | tee -a "${ARTIFACTS}/tier2-log.txt" &
-      TEST_PID=$!
-      echo "Tier2 Windows phase started with PID: ${TEST_PID}"
-      wait_for_pytest_pipeline "${TEST_PID}" "${ARTIFACTS}/.exit_code_windows"
-      WIN_EXIT=$(cat "${ARTIFACTS}/.exit_code_windows" 2>/dev/null || echo "0")
-      if [ "${WIN_EXIT}" == "5" ] && [ "${TIER2_SELECTIVE_FILTER}" == "true" ]; then
-        echo "No Windows tests matched the filter (pytest exit code 5). Treating Windows phase as success."
-        WIN_EXIT=0
-      fi
-      if [ "${WIN_EXIT}" != "0" ]; then
-        echo "${WIN_EXIT}" > "${ARTIFACTS}/.exit_code"
-      elif [ -f "${ARTIFACTS}/junit.windows.xml" ] && [ -f "${ARTIFACTS}/junit.results.xml" ]; then
-        merge_junit_files "${ARTIFACTS}/junit.results.xml" "${ARTIFACTS}/junit.windows.xml" "${ARTIFACTS}/junit.results.xml"
-      elif [ -f "${ARTIFACTS}/junit.windows.xml" ]; then
-        cp "${ARTIFACTS}/junit.windows.xml" "${ARTIFACTS}/junit.results.xml"
-      fi
+    PHASE1_EXIT=$(cat "${ARTIFACTS}/.exit_code" 2>/dev/null || echo "1")
+    echo "Running cross-module Windows tests (phase 2)..."
+    rm -f "${ARTIFACTS}/.exit_code_windows"
+    (set +e; .venv/bin/pytest \
+      -m "conformance and windows" \
+      --skip-artifactory-check \
+      --latest-rhel \
+      --tc=hco_subscription:${SUBSCRIPTION_NAME} \
+      --conformance-storage-class=${STORAGE_CLASS} \
+      --tc=storage_class_a:${STORAGE_CLASS} \
+      --tc=storage_class_b:${STORAGE_CLASS} \
+      ${STORAGE_CLASS_CONFIG} \
+      ${HCP_FLAG} \
+      ${OS_LOGIN_FLAG} \
+      ${WIN_IMAGE_FLAG} \
+      -s -o log_cli=true \
+      "${K_ARGS[@]}" \
+      --data-collector \
+      --data-collector-output-dir=${ARTIFACTS} \
+      --pytest-log-file=${ARTIFACTS}/pytest-windows-logs.txt \
+      --junitxml="${ARTIFACTS}/junit.windows.xml"; echo $? > "${ARTIFACTS}/.exit_code_windows") 2>&1 | tee -a "${ARTIFACTS}/tier2-log.txt" &
+    TEST_PID=$!
+    echo "Tier2 Windows phase started with PID: ${TEST_PID}"
+    wait_for_pytest_pipeline "${TEST_PID}" "${ARTIFACTS}/.exit_code_windows"
+    WIN_EXIT=$(cat "${ARTIFACTS}/.exit_code_windows" 2>/dev/null || echo "0")
+    if [ "${WIN_EXIT}" == "5" ] && [ "${TIER2_SELECTIVE_FILTER}" == "true" ]; then
+      echo "No Windows tests matched the filter (pytest exit code 5). Treating Windows phase as success."
+      WIN_EXIT=0
+    fi
+    # Merge Windows results even on failure so the summary shows real test failures
+    # instead of classifying a nonzero exit + clean primary suite as setup failure.
+    if [ -f "${ARTIFACTS}/junit.windows.xml" ] && [ -f "${ARTIFACTS}/junit.results.xml" ]; then
+      merge_junit_files "${ARTIFACTS}/junit.results.xml" "${ARTIFACTS}/junit.windows.xml" "${ARTIFACTS}/junit.results.xml"
+    elif [ -f "${ARTIFACTS}/junit.windows.xml" ]; then
+      cp "${ARTIFACTS}/junit.windows.xml" "${ARTIFACTS}/junit.results.xml"
+    fi
+    if [ "${PHASE1_EXIT}" != "0" ]; then
+      echo "${PHASE1_EXIT}" > "${ARTIFACTS}/.exit_code"
+    elif [ "${WIN_EXIT}" != "0" ]; then
+      echo "${WIN_EXIT}" > "${ARTIFACTS}/.exit_code"
+    else
+      echo 0 > "${ARTIFACTS}/.exit_code"
     fi
   fi
 fi
