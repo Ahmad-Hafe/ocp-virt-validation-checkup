@@ -211,9 +211,10 @@ tier2_windows_only() {
 # Sets TIER2_PATH_ARGS as a bash array.
 # Empty array means unrestricted modules when:
 #   - legacy `tier2` was selected (TIER2_ALL_MODULES=true), or
-#   - windows-only selection (no path SIGs)
-# Hierarchical path SIGs always get explicit paths, even if all four are selected,
-# so we do not accidentally pull in other OVT modules (observability, etc.).
+#   - windows is selected (windows tests span modules; path filters would drop them), or
+#   - windows-only selection
+# Hierarchical path SIGs without windows always get explicit paths, even if all
+# four are selected, so we do not pull in unrelated OVT modules.
 build_tier2_path_args() {
   TIER2_PATH_ARGS=()
   local selected_paths=()
@@ -238,7 +239,18 @@ build_tier2_path_args() {
     fi
   done
 
-  # Windows-only → no path filter (marker-based across modules).
+  # $1 = "true" when Windows tests will actually run (image available).
+  # Windows is marker-based across modules; path filters would drop that coverage.
+  local windows_active="${1:-false}"
+  if [[ "${windows_active}" == "true" ]]; then
+    if [[ ${selected_count} -gt 0 ]]; then
+      echo "WARNING: tier2/windows spans modules; clearing path filter so Windows tests are not dropped." >&2
+    fi
+    TIER2_PATH_ARGS=()
+    return 0
+  fi
+
+  # No path SIGs (windows-only / empty) → unrestricted.
   if [[ ${selected_count} -eq 0 ]]; then
     TIER2_PATH_ARGS=()
     return 0

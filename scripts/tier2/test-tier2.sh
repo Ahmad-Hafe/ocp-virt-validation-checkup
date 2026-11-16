@@ -242,9 +242,6 @@ if [ -n "${K_EXPR}" ]; then
   K_ARGS=(-k "${K_EXPR}")
 fi
 
-# Build pytest path + marker selection from resolved Tier-2 SIGs.
-# Path SIGs map to OVT module directories; windows is marker-based.
-build_tier2_path_args
 WINDOWS_REQUESTED=false
 if tier2_sig_enabled "windows"; then
   WINDOWS_REQUESTED=true
@@ -294,8 +291,7 @@ PYEOF
 
 # Image is usable when:
 # - EULA tool-managed path is active (setup already ran, or dry-run discovery), or
-# - BYOI DataSource is Ready and not a stale tool-managed leftover, or
-# - Tool-managed DataSource is Ready while EULA is still accepted for this run.
+# - BYOI DataSource is Ready and not a stale tool-managed leftover.
 WINDOWS_IMAGE_AVAILABLE=false
 if [ "${ACCEPT_WINDOWS_EULA}" == "true" ]; then
   WINDOWS_IMAGE_AVAILABLE=true
@@ -303,7 +299,9 @@ elif [ "${DS_READY}" == "True" ] && [ "${DS_LABEL}" != "ocp-virt-validation" ]; 
   WINDOWS_IMAGE_AVAILABLE=true
 fi
 
+WINDOWS_WILL_RUN=false
 if [ "${WINDOWS_REQUESTED}" == "true" ] && [ "${WINDOWS_IMAGE_AVAILABLE}" == "true" ]; then
+  WINDOWS_WILL_RUN=true
   echo "Windows golden image available - Windows tests will be included"
   cat >> "${OS_LOGIN_CONFIG}" <<'PYEOF'
 os_login_param["win-container-disk"] = {
@@ -317,17 +315,29 @@ PYEOF
     MARKERS="conformance and windows"
   fi
 elif [ "${WINDOWS_REQUESTED}" == "true" ] && [ "${WINDOWS_IMAGE_AVAILABLE}" != "true" ]; then
-  echo "WARNING: tier2/windows selected but no golden image is available; Windows tests will be skipped"
   if tier2_windows_only; then
-    # Narrow to windows marker so we do not silently run other conformance tests.
-    MARKERS="conformance and windows"
+    # Explicit Windows-only request with no image must not report a green empty run.
+    if [ "${DRY_RUN}" == "true" ]; then
+      echo "WARNING: tier2/windows selected but no golden image is available (dry-run)."
+      MARKERS="conformance and windows"
+    else
+      echo "ERROR: tier2/windows selected but no golden image is available."
+      echo "Provide a Ready BYOI DataSource or set ACCEPT_WINDOWS_EULA=true."
+      echo 1 > "${ARTIFACTS}/.exit_code"
+      exit 1
+    fi
   else
+    echo "WARNING: tier2/windows selected but no golden image is available; Windows tests will be skipped"
     MARKERS="conformance and not windows"
   fi
 else
   # Windows not selected — exclude even if a golden image happens to exist.
   MARKERS="conformance and not windows"
 fi
+
+# Path SIGs map to OVT module directories. Build after Windows availability is known:
+# when Windows will run, path filters are cleared so cross-module Windows tests remain.
+build_tier2_path_args "${WINDOWS_WILL_RUN}"
 
 cat >> "${OS_LOGIN_CONFIG}" <<'PYEOF'
 
@@ -346,10 +356,10 @@ else
   echo "Using module paths: <all modules>"
 fi
 
-# True when path/focus/windows-only filters may legitimately collect zero tests.
+# Only TEST_FOCUS/TEST_SKIPS may legitimately collect zero tests.
+# Path filters and windows-only markers must NOT mask empty collection as success.
 TIER2_SELECTIVE_FILTER=false
-if [ -n "${K_EXPR}" ] || [[ ${#TIER2_PATH_ARGS[@]} -gt 0 ]] || \
-   [[ "${MARKERS}" == "conformance and windows" ]]; then
+if [ -n "${K_EXPR}" ]; then
   TIER2_SELECTIVE_FILTER=true
 fi
 
