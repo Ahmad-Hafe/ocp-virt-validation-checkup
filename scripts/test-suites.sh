@@ -162,14 +162,22 @@ resolve_test_suites() {
 
   # Windows exists only under Tier-2. The Accept EULA control enables Windows
   # testing, so when ACCEPT_WINDOWS_EULA=true always include tier2/windows.
+  WINDOWS_ADDED_BY_EULA="false"
   if [ "${ACCEPT_WINDOWS_EULA}" == "true" ]; then
     if ! _suite_list_contains "${RESOLVED_TIER2_SUITES}" "windows"; then
       echo "ACCEPT_WINDOWS_EULA=true: adding tier2/windows (Windows is Tier-2 only)." >&2
       _append_unique RESOLVED_TIER2_SUITES "windows"
+      WINDOWS_ADDED_BY_EULA="true"
     fi
   fi
 
-  # Build progress units: each Tier-1 SIG + single "tier2" if any Tier-2 selected.
+  _rebuild_progress_suites
+  return 0
+}
+
+# Rebuild PROGRESS_SUITES from the current RESOLVED_* selection.
+_rebuild_progress_suites() {
+  PROGRESS_SUITES=""
   local sig
   IFS=',' read -ra _t1 <<< "${RESOLVED_TIER1_SUITES}"
   for sig in "${_t1[@]}"; do
@@ -179,8 +187,38 @@ resolve_test_suites() {
   if [[ -n "${RESOLVED_TIER2_SUITES}" ]]; then
     _append_unique PROGRESS_SUITES "tier2"
   fi
+}
 
-  return 0
+# Remove a SIG from a comma-separated suite list variable.
+remove_from_suite_list() {
+  local var_name="$1"
+  local remove="$2"
+  local current="${!var_name}"
+  local result=""
+  local item
+  IFS=',' read -ra _items <<< "${current}"
+  for item in "${_items[@]}"; do
+    item="$(_trim "${item}")"
+    [[ -z "${item}" || "${item}" == "${remove}" ]] && continue
+    if [[ -z "${result}" ]]; then
+      result="${item}"
+    else
+      result="${result},${item}"
+    fi
+  done
+  printf -v "${var_name}" '%s' "${result}"
+}
+
+# After Windows setup is skipped for prerequisites, drop Windows that was only
+# added by ACCEPT_WINDOWS_EULA so Tier-1 (and other) suites can finish cleanly.
+drop_eula_added_windows() {
+  if [[ "${WINDOWS_ADDED_BY_EULA}" != "true" ]]; then
+    return 0
+  fi
+  echo "Removing implicitly added tier2/windows after Windows setup skip." >&2
+  remove_from_suite_list RESOLVED_TIER2_SUITES "windows"
+  WINDOWS_ADDED_BY_EULA="false"
+  _rebuild_progress_suites
 }
 
 tier1_enabled() {
@@ -218,10 +256,9 @@ tier2_windows_only() {
 # Sets TIER2_PATH_ARGS as a bash array.
 # Empty array means unrestricted modules when:
 #   - legacy `tier2` was selected (TIER2_ALL_MODULES=true), or
-#   - windows is selected (windows tests span modules; path filters would drop them), or
-#   - windows-only selection
-# Hierarchical path SIGs without windows always get explicit paths, even if all
-# four are selected, so we do not pull in unrelated OVT modules.
+#   - windows-only selection (no path SIGs)
+# Hierarchical path SIGs always get explicit paths. Mixed path+windows runs keep
+# these paths for the non-Windows phase and run Windows in a second phase.
 build_tier2_path_args() {
   TIER2_PATH_ARGS=()
   local selected_paths=()
@@ -245,17 +282,6 @@ build_tier2_path_args() {
       selected_paths+=("${path}")
     fi
   done
-
-  # $1 = "true" when Windows tests will actually run (image available).
-  # Windows is marker-based across modules; path filters would drop that coverage.
-  local windows_active="${1:-false}"
-  if [[ "${windows_active}" == "true" ]]; then
-    if [[ ${selected_count} -gt 0 ]]; then
-      echo "WARNING: tier2/windows spans modules; clearing path filter so Windows tests are not dropped." >&2
-    fi
-    TIER2_PATH_ARGS=()
-    return 0
-  fi
 
   # No path SIGs (windows-only / empty) → unrestricted.
   if [[ ${selected_count} -eq 0 ]]; then

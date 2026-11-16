@@ -232,7 +232,7 @@ echo "Resolved Tier-1 suites: ${RESOLVED_TIER1_SUITES:-<none>}"
 echo "Resolved Tier-2 suites: ${RESOLVED_TIER2_SUITES:-<none>}"
 echo "Tier-2 unrestricted modules: ${TIER2_ALL_MODULES:-false}"
 # Exported for progress_watcher dry-run discovery and tier2 path/marker selection.
-export RESOLVED_TIER1_SUITES RESOLVED_TIER2_SUITES PROGRESS_SUITES TIER2_ALL_MODULES
+export RESOLVED_TIER1_SUITES RESOLVED_TIER2_SUITES PROGRESS_SUITES TIER2_ALL_MODULES WINDOWS_ADDED_BY_EULA
 
 
 VALID_FILTER_REGEX='^([^|]+)(\|([^|]+))*$'
@@ -424,6 +424,11 @@ if [ -f "${WINDOWS_SETUP_SCRIPT}" ]; then
         echo "WARNING: Windows golden image setup skipped (missing prerequisite). Windows tests will be skipped."
         echo "All other test suites will continue normally."
         unset ACCEPT_WINDOWS_EULA
+        # Drop Windows that was only implied by EULA so Tier-1-only jobs do not
+        # hard-fail in a leftover windows-only Tier-2 phase.
+        drop_eula_added_windows
+        export RESOLVED_TIER1_SUITES RESOLVED_TIER2_SUITES PROGRESS_SUITES WINDOWS_ADDED_BY_EULA
+        echo "Resolved Tier-2 suites after Windows skip: ${RESOLVED_TIER2_SUITES:-<none>}"
         ;;
       *)
         echo "ERROR: Windows golden image setup failed (exit ${WINDOWS_SETUP_EXIT}). Aborting validation."
