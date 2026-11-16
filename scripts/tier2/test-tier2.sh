@@ -10,6 +10,7 @@ source "${SCRIPT_DIR}/../test-suites.sh"
 if [[ -z "${RESOLVED_TIER2_SUITES:-}" ]]; then
   resolve_test_suites "${TEST_SUITES:-tier2}" || exit 1
 fi
+TIER2_ALL_MODULES="${TIER2_ALL_MODULES:-false}"
 
 function cleanup_test_namespaces() {
     echo "Cleaning up tier2 test namespaces..."
@@ -291,9 +292,14 @@ os_login_param = {
 }
 PYEOF
 
+# Image is usable when:
+# - EULA tool-managed path is active (setup already ran, or dry-run discovery), or
+# - BYOI DataSource is Ready and not a stale tool-managed leftover, or
+# - Tool-managed DataSource is Ready while EULA is still accepted for this run.
 WINDOWS_IMAGE_AVAILABLE=false
-if [ "${ACCEPT_WINDOWS_EULA}" == "true" ] || \
-   { [ "${DS_READY}" == "True" ] && [ "${DS_LABEL}" != "ocp-virt-validation" ]; }; then
+if [ "${ACCEPT_WINDOWS_EULA}" == "true" ]; then
+  WINDOWS_IMAGE_AVAILABLE=true
+elif [ "${DS_READY}" == "True" ] && [ "${DS_LABEL}" != "ocp-virt-validation" ]; then
   WINDOWS_IMAGE_AVAILABLE=true
 fi
 
@@ -306,26 +312,17 @@ os_login_param["win-container-disk"] = {
 }
 PYEOF
   WIN_IMAGE_FLAG="--tc=win_golden_image_name:${GOLDEN_IMAGE_NAME}"
-  # Windows-only selection focuses the marker expression.
-  if [[ ${#TIER2_PATH_ARGS[@]} -eq 0 ]] && \
-     ! tier2_sig_enabled "compute" && \
-     ! tier2_sig_enabled "storage" && \
-     ! tier2_sig_enabled "network" && \
-     ! tier2_sig_enabled "infrastructure"; then
+  # Windows-only selection focuses the marker expression across modules.
+  if tier2_windows_only; then
     MARKERS="conformance and windows"
   fi
 elif [ "${WINDOWS_REQUESTED}" == "true" ] && [ "${WINDOWS_IMAGE_AVAILABLE}" != "true" ]; then
   echo "WARNING: tier2/windows selected but no golden image is available; Windows tests will be skipped"
-  MARKERS="conformance and not windows"
-  # Windows-only with no image → force empty run via impossible marker combo avoided;
-  # keep "conformance and not windows" with no paths still collects non-windows. If
-  # only windows was requested, narrow to windows marker so collection is empty/skipped.
-  if [[ ${#TIER2_PATH_ARGS[@]} -eq 0 ]] && \
-     ! tier2_sig_enabled "compute" && \
-     ! tier2_sig_enabled "storage" && \
-     ! tier2_sig_enabled "network" && \
-     ! tier2_sig_enabled "infrastructure"; then
+  if tier2_windows_only; then
+    # Narrow to windows marker so we do not silently run other conformance tests.
     MARKERS="conformance and windows"
+  else
+    MARKERS="conformance and not windows"
   fi
 else
   # Windows not selected — exclude even if a golden image happens to exist.

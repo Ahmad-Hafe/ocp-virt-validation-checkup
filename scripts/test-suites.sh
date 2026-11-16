@@ -5,13 +5,17 @@
 # Legacy:      compute,network,storage,ssp,tier2  (kept as aliases)
 #
 # After resolve_test_suites "$TEST_SUITES":
-#   RESOLVED_TIER1_SUITES  - comma-separated: compute,network,storage,ssp
-#   RESOLVED_TIER2_SUITES  - comma-separated: compute,storage,network,infrastructure,windows
-#   PROGRESS_SUITES        - comma-separated execution units for progress_watcher
-#                            (tier1 SIGs + "tier2" if any tier2 selected)
+#   RESOLVED_TIER1_SUITES     - comma-separated: compute,network,storage,ssp
+#   RESOLVED_TIER2_SUITES     - comma-separated: compute,storage,network,infrastructure,windows
+#   TIER2_ALL_MODULES        - "true" when legacy `tier2` was selected (unrestricted OVT paths)
+#   PROGRESS_SUITES          - comma-separated execution units for progress_watcher
+#                              (tier1 SIGs + "tier2" if any tier2 selected)
+#
+# Windows exists only under Tier-2. ACCEPT_WINDOWS_EULA=true always adds tier2/windows.
 
 TIER1_SIGS="compute network storage ssp"
 TIER2_SIGS="compute storage network infrastructure windows"
+TIER2_PATH_SIGS="compute storage network infrastructure"
 
 TIER2_PATH_compute="tests/virt"
 TIER2_PATH_storage="tests/storage"
@@ -25,7 +29,8 @@ _suite_list_contains() {
   local item
   IFS=',' read -ra _items <<< "${haystack}"
   for item in "${_items[@]}"; do
-    item="$(echo "${item}" | xargs)"
+    item="${item#"${item%%[![:space:]]*}"}"
+    item="${item%"${item##*[![:space:]]}"}"
     if [[ "${item}" == "${needle}" ]]; then
       return 0
     fi
@@ -47,6 +52,13 @@ _append_unique() {
   fi
 }
 
+_trim() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "${s}"
+}
+
 # Validate a single suite token. Prints error to stderr and returns 1 on failure.
 validate_suite_token() {
   local token="$1"
@@ -64,6 +76,7 @@ validate_suite_token() {
       echo "Invalid TEST_SUITES entry: \"${token}\"" >&2
       echo "Allowed legacy values: compute, network, storage, ssp, tier2" >&2
       echo "Allowed hierarchical values: tier1/{compute,network,storage,ssp}, tier2/{compute,storage,network,infrastructure,windows}" >&2
+      echo "Note: Windows exists only under Tier-2 (tier2/windows). There is no tier1/windows." >&2
       return 1
       ;;
   esac
@@ -78,7 +91,7 @@ validate_test_suites() {
   fi
   IFS=',' read -ra _tokens <<< "${input}"
   for token in "${_tokens[@]}"; do
-    token="$(echo "${token}" | xargs)"
+    token="$(_trim "${token}")"
     if [[ -z "${token}" ]]; then
       echo "Invalid TEST_SUITES: empty entry in \"${input}\"" >&2
       return 1
@@ -89,33 +102,43 @@ validate_test_suites() {
 }
 
 # Resolve TEST_SUITES into RESOLVED_TIER1_SUITES / RESOLVED_TIER2_SUITES / PROGRESS_SUITES.
-# Emits non-fatal warnings for legacy aliases that map to Tier-1 only.
+# Emits non-fatal warnings for bare legacy aliases when Tier-2 was not also requested.
 resolve_test_suites() {
   local input="$1"
   RESOLVED_TIER1_SUITES=""
   RESOLVED_TIER2_SUITES=""
   PROGRESS_SUITES=""
+  TIER2_ALL_MODULES="false"
 
   validate_test_suites "${input}" || return 1
 
   local token
+  local input_requests_tier2="false"
   IFS=',' read -ra _tokens <<< "${input}"
   for token in "${_tokens[@]}"; do
-    token="$(echo "${token}" | xargs)"
+    token="$(_trim "${token}")"
+    case "${token}" in
+      tier2|tier2/*)
+        input_requests_tier2="true"
+        ;;
+    esac
+  done
+
+  for token in "${_tokens[@]}"; do
+    token="$(_trim "${token}")"
     case "${token}" in
       compute|network|storage|ssp)
-        case "${token}" in
-          compute|network|storage)
-            echo "WARNING: '${token}' maps to tier1/${token} only. To include Tier-2 coverage use tier1/${token},tier2/${token}." >&2
-            ;;
-          ssp)
-            echo "WARNING: 'ssp' maps to tier1/ssp only." >&2
-            ;;
-        esac
+        # Warn only for subset runs where partners may think bare names include Tier-2.
+        # Skip noise when legacy `tier2` (or any tier2/*) is already in the same list,
+        # and skip ssp (no Tier-2 ssp equivalent).
+        if [[ "${input_requests_tier2}" != "true" && "${token}" != "ssp" ]]; then
+          echo "WARNING: '${token}' maps to tier1/${token} only. To include Tier-2 coverage use tier1/${token},tier2/${token}." >&2
+        fi
         _append_unique RESOLVED_TIER1_SUITES "${token}"
         ;;
       tier2)
-        # Legacy blob: all Tier-2 SIGs (same coverage as today).
+        # Legacy blob: all Tier-2 SIGs + unrestricted OVT module paths (same as today).
+        TIER2_ALL_MODULES="true"
         local sig
         for sig in ${TIER2_SIGS}; do
           _append_unique RESOLVED_TIER2_SUITES "${sig}"
@@ -172,20 +195,37 @@ tier2_windows_setup_needed() {
   tier2_sig_enabled "windows"
 }
 
+# True when the only Tier-2 SIG selected is windows (no path SIGs).
+tier2_windows_only() {
+  tier2_sig_enabled "windows" || return 1
+  local sig
+  for sig in ${TIER2_PATH_SIGS}; do
+    if tier2_sig_enabled "${sig}"; then
+      return 1
+    fi
+  done
+  return 0
+}
+
 # Build pytest path args for selected Tier-2 module SIGs (excludes windows).
 # Sets TIER2_PATH_ARGS as a bash array.
-# Empty array = no path filter (all modules), used when all path SIGs are selected
-# or when only windows is selected.
+# Empty array means unrestricted modules when:
+#   - legacy `tier2` was selected (TIER2_ALL_MODULES=true), or
+#   - windows-only selection (no path SIGs)
+# Hierarchical path SIGs always get explicit paths, even if all four are selected,
+# so we do not accidentally pull in other OVT modules (observability, etc.).
 build_tier2_path_args() {
   TIER2_PATH_ARGS=()
   local selected_paths=()
   local sig path
-  local path_sigs="compute storage network infrastructure"
   local selected_count=0
-  local total_path_sigs=0
 
-  for sig in ${path_sigs}; do
-    total_path_sigs=$((total_path_sigs + 1))
+  if [[ "${TIER2_ALL_MODULES}" == "true" ]]; then
+    TIER2_PATH_ARGS=()
+    return 0
+  fi
+
+  for sig in ${TIER2_PATH_SIGS}; do
     if tier2_sig_enabled "${sig}"; then
       selected_count=$((selected_count + 1))
       case "${sig}" in
@@ -198,8 +238,8 @@ build_tier2_path_args() {
     fi
   done
 
-  # No path SIGs (windows-only) or all path SIGs → no path filter.
-  if [[ ${selected_count} -eq 0 || ${selected_count} -eq ${total_path_sigs} ]]; then
+  # Windows-only → no path filter (marker-based across modules).
+  if [[ ${selected_count} -eq 0 ]]; then
     TIER2_PATH_ARGS=()
     return 0
   fi
@@ -222,7 +262,7 @@ estimate_storage_gi_for_suites() {
   if [[ -n "${RESOLVED_TIER2_SUITES}" ]]; then
     total=$((total + 10))
   fi
-  # Floor so a windows-only run still gets a usable PVC.
+  # Floor so a theoretically empty resolution still gets a usable PVC.
   if [[ ${total} -eq 0 ]]; then
     total=2
   fi

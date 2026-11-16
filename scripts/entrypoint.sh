@@ -230,8 +230,9 @@ if ! resolve_test_suites "${TEST_SUITES}"; then
 fi
 echo "Resolved Tier-1 suites: ${RESOLVED_TIER1_SUITES:-<none>}"
 echo "Resolved Tier-2 suites: ${RESOLVED_TIER2_SUITES:-<none>}"
+echo "Tier-2 unrestricted modules: ${TIER2_ALL_MODULES:-false}"
 # Exported for progress_watcher dry-run discovery and tier2 path/marker selection.
-export RESOLVED_TIER1_SUITES RESOLVED_TIER2_SUITES PROGRESS_SUITES
+export RESOLVED_TIER1_SUITES RESOLVED_TIER2_SUITES PROGRESS_SUITES TIER2_ALL_MODULES
 
 
 VALID_FILTER_REGEX='^([^|]+)(\|([^|]+))*$'
