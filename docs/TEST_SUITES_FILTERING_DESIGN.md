@@ -46,6 +46,8 @@ Tier1                                   Tier2
                                                               (golden-image gated)
 ```
 
+There is **no Windows under Tier-1**. Windows lives only in Tier-2.
+
 Examples:
 
 ```bash
@@ -57,12 +59,38 @@ TEST_SUITES=tier2/windows                         # Windows only
 ```mermaid
 flowchart TD
     A["TEST_SUITES"] --> B["Resolve aliases / parse tier1 and tier2"]
-    B --> C["Run selected Tier1 SIGs"]
-    B --> D["Run selected Tier2 paths / markers"]
+    B --> W{"ACCEPT_WINDOWS_EULA=true?"}
+    W -->|Yes| X["Add tier2/windows"]
+    W -->|No| C
+    X --> C["Run selected Tier1 SIGs"]
+    X --> D["Run selected Tier2 paths / markers"]
+    C --> D
     D --> E{"windows selected?"}
     E -->|Yes| F["Golden-image setup if needed"]
     E -->|No| G["Exclude windows tests"]
 ```
+
+---
+
+## Windows and Accept EULA
+
+Windows is **Tier-2 only** — there is no `tier1/windows`.
+
+The UI **Accept Windows EULA** control sets `ACCEPT_WINDOWS_EULA=true`. That flag keeps its current meaning (“enable Windows testing”):
+
+- Always adds `tier2/windows` to the resolved selection
+- Triggers golden-image setup (tool-created path)
+- Windows tests still need a golden image (EULA build or BYOI)
+
+So Accept EULA continues to work with the default suite list, and also when the user picked Tier-1-only or Tier-2 storage without explicitly selecting Windows.
+
+| Input | Resolved Windows behavior |
+|-------|---------------------------|
+| default suites + EULA | `tier2` already includes windows; setup runs |
+| `tier2/windows` + EULA | Windows selected; setup runs |
+| `tier2/storage` + EULA | becomes `storage,windows`; setup runs |
+| `tier1/storage` + EULA | adds `tier2/windows`; setup runs |
+| `tier2/storage` without EULA | storage only; no Windows |
 
 ---
 
@@ -77,8 +105,6 @@ Old values keep working and keep today’s meaning:
 | default `compute,network,storage,ssp,tier2` | same coverage as today |
 
 `storage` stays Tier-1 only. Full storage coverage is opt-in: `tier1/storage,tier2/storage`.
-
-Windows exists only under Tier-2. `ACCEPT_WINDOWS_EULA=true` (UI Accept EULA) always adds `tier2/windows`.
 
 ---
 
