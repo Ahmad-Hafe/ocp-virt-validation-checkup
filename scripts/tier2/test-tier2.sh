@@ -538,8 +538,12 @@ print(f'Generated JUnit XML with {total_tests} test(s) ({len(test_ids)} collecte
   # Run even if phase 1 failed so Windows coverage still appears in the report.
   if [ "${TIER2_SPLIT_WINDOWS}" == "true" ]; then
     PHASE1_EXIT=$(cat "${ARTIFACTS}/.exit_code" 2>/dev/null || echo "1")
+    echo "${PHASE1_EXIT}" > "${ARTIFACTS}/.exit_code_phase1"
+    rm -f "${ARTIFACTS}/junit.phase1.xml" "${ARTIFACTS}/junit.windows.xml" "${ARTIFACTS}/.exit_code_windows"
+    if [ -f "${ARTIFACTS}/junit.results.xml" ]; then
+      cp "${ARTIFACTS}/junit.results.xml" "${ARTIFACTS}/junit.phase1.xml"
+    fi
     echo "Collecting cross-module Windows tests (dry-run phase 2)..."
-    rm -f "${ARTIFACTS}/.exit_code_windows"
     (set +e; .venv/bin/pytest \
       -m "conformance and windows" \
       --skip-artifactory-check \
@@ -718,8 +722,13 @@ if matched:
   # coverage is not lost; combine statuses and merge available JUnit files.
   if [ "${TIER2_SPLIT_WINDOWS}" == "true" ]; then
     PHASE1_EXIT=$(cat "${ARTIFACTS}/.exit_code" 2>/dev/null || echo "1")
+    echo "${PHASE1_EXIT}" > "${ARTIFACTS}/.exit_code_phase1"
+    # Drop stale per-phase artifacts so retries cannot merge a previous run's XML.
+    rm -f "${ARTIFACTS}/junit.phase1.xml" "${ARTIFACTS}/junit.windows.xml" "${ARTIFACTS}/.exit_code_windows"
+    if [ -f "${ARTIFACTS}/junit.results.xml" ]; then
+      cp "${ARTIFACTS}/junit.results.xml" "${ARTIFACTS}/junit.phase1.xml"
+    fi
     echo "Running cross-module Windows tests (phase 2)..."
-    rm -f "${ARTIFACTS}/.exit_code_windows"
     (set +e; .venv/bin/pytest \
       -m "conformance and windows" \
       --skip-artifactory-check \
@@ -746,8 +755,8 @@ if matched:
       echo "No Windows tests matched the filter (pytest exit code 5). Treating Windows phase as success."
       WIN_EXIT=0
     fi
-    # Merge Windows results even on failure so the summary shows real test failures
-    # instead of classifying a nonzero exit + clean primary suite as setup failure.
+    # Merge only XML produced by this invocation (file was removed before the phase).
+    # Merge even on failure so real Windows failures appear in the primary report.
     if [ -f "${ARTIFACTS}/junit.windows.xml" ] && [ -f "${ARTIFACTS}/junit.results.xml" ]; then
       merge_junit_files "${ARTIFACTS}/junit.results.xml" "${ARTIFACTS}/junit.windows.xml" "${ARTIFACTS}/junit.results.xml"
     elif [ -f "${ARTIFACTS}/junit.windows.xml" ]; then

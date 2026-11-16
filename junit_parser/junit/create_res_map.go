@@ -48,9 +48,10 @@ func NewResultMap(dir string) (map[string]TestSuite, error) {
 
 		go func(sig string) {
 			defer wg.Done()
-			exitCode := readExitCode(path.Join(dir, sig, ".exit_code"))
+			sigDir := path.Join(dir, sig)
+			exitCode := readExitCode(path.Join(sigDir, ".exit_code"))
 
-			fileName := path.Join(dir, sig, junitFileName)
+			fileName := path.Join(sigDir, junitFileName)
 			junitResult, err := readOneFile(fileName)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
@@ -60,7 +61,14 @@ func NewResultMap(dir string) (map[string]TestSuite, error) {
 				return
 			}
 
-			if exitCode != 0 && junitResult.Failures == 0 && junitResult.Errors == 0 {
+			// Split Tier-2 path+Windows runs record per-phase exits/JUnit. Assess
+			// each phase so a Windows test failure cannot mask a path setup failure.
+			if hasSplitPhaseArtifacts(sigDir) {
+				if phaseSetupFailure(readExitCode(path.Join(sigDir, ".exit_code_phase1")), path.Join(sigDir, "junit.phase1.xml")) ||
+					phaseSetupFailure(readExitCode(path.Join(sigDir, ".exit_code_windows")), path.Join(sigDir, "junit.windows.xml")) {
+					junitResult.SetupFailure = true
+				}
+			} else if exitCode != 0 && junitResult.Failures == 0 && junitResult.Errors == 0 {
 				junitResult.SetupFailure = true
 			}
 
@@ -91,6 +99,25 @@ func readExitCode(filePath string) int {
 		return 0
 	}
 	return code
+}
+
+func hasSplitPhaseArtifacts(sigDir string) bool {
+	_, errPhase1 := os.Stat(path.Join(sigDir, ".exit_code_phase1"))
+	_, errWindows := os.Stat(path.Join(sigDir, ".exit_code_windows"))
+	return errPhase1 == nil || errWindows == nil
+}
+
+// phaseSetupFailure is true when a phase exited nonzero without reporting test
+// failures/errors (missing JUnit counts as a setup failure).
+func phaseSetupFailure(exitCode int, junitPath string) bool {
+	if exitCode == 0 {
+		return false
+	}
+	suite, err := readOneFile(junitPath)
+	if err != nil {
+		return true
+	}
+	return suite.Failures == 0 && suite.Errors == 0
 }
 
 func readOneFile(fileName string) (TestSuite, error) {

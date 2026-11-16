@@ -7,6 +7,110 @@ import (
 	"testing"
 )
 
+func TestPhaseSetupFailureMaskedByOtherPhaseFailures(t *testing.T) {
+	dir := t.TempDir()
+	tier2Dir := path.Join(dir, "tier2")
+	if err := os.Mkdir(tier2Dir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Merged report has Windows test failures, but path phase was a setup failure.
+	merged := `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="1" failures="1" errors="0" skipped="0">
+  <testsuite name="pytest-windows" tests="1" failures="1" errors="0" skipped="0">
+    <testcase classname="tests.virt.test_win" name="test_win_fail">
+      <failure>windows failed</failure>
+    </testcase>
+  </testsuite>
+</testsuites>`
+	windows := `<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="pytest-windows" tests="1" failures="1" errors="0" skipped="0">
+  <testcase classname="tests.virt.test_win" name="test_win_fail">
+    <failure>windows failed</failure>
+  </testcase>
+</testsuite>`
+
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(path.Join(tier2Dir, name), []byte(content), 0644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	write(junitFileName, merged)
+	write("junit.windows.xml", windows)
+	write(".exit_code", "1\n")
+	write(".exit_code_phase1", "1\n")
+	write(".exit_code_windows", "1\n")
+	// No junit.phase1.xml → path phase setup failure
+
+	result, err := NewResultMap(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	suite, ok := result["tier2"]
+	if !ok {
+		t.Fatal("expected tier2 suite")
+	}
+	if !suite.SetupFailure {
+		t.Fatal("expected SetupFailure when path phase exited without JUnit")
+	}
+	if suite.Failures != 1 {
+		t.Fatalf("expected merged Windows failure to remain visible, got failures=%d", suite.Failures)
+	}
+}
+
+func TestPhaseSetupFailureAbsentWhenPhasesReportTestFailures(t *testing.T) {
+	dir := t.TempDir()
+	tier2Dir := path.Join(dir, "tier2")
+	if err := os.Mkdir(tier2Dir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	phase1 := `<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="pytest" tests="1" failures="1" errors="0" skipped="0">
+  <testcase classname="tests.storage.test_a" name="test_path_fail">
+    <failure>path failed</failure>
+  </testcase>
+</testsuite>`
+	windows := `<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="pytest-windows" tests="1" failures="0" errors="0" skipped="0">
+  <testcase classname="tests.virt.test_win" name="test_win_ok"/>
+</testsuite>`
+	merged := `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="2" failures="1" errors="0" skipped="0">
+  <testsuite name="pytest" tests="1" failures="1" errors="0" skipped="0">
+    <testcase classname="tests.storage.test_a" name="test_path_fail">
+      <failure>path failed</failure>
+    </testcase>
+  </testsuite>
+  <testsuite name="pytest-windows" tests="1" failures="0" errors="0" skipped="0">
+    <testcase classname="tests.virt.test_win" name="test_win_ok"/>
+  </testsuite>
+</testsuites>`
+
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(path.Join(tier2Dir, name), []byte(content), 0644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	write(junitFileName, merged)
+	write("junit.phase1.xml", phase1)
+	write("junit.windows.xml", windows)
+	write(".exit_code", "1\n")
+	write(".exit_code_phase1", "1\n")
+	write(".exit_code_windows", "0\n")
+
+	result, err := NewResultMap(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	suite := result["tier2"]
+	if suite.SetupFailure {
+		t.Fatal("did not expect SetupFailure when path phase reported test failures")
+	}
+}
+
 func TestReadTestSuiteAggregatesMultipleSuites(t *testing.T) {
 	xmlContent := `<?xml version="1.0" encoding="UTF-8"?>
 <testsuites tests="3" failures="1" errors="0" skipped="0">
