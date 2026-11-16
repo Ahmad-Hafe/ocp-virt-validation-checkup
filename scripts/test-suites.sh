@@ -130,6 +130,15 @@ resolve_test_suites() {
     esac
   done
 
+  # Windows exists only under Tier-2. The Accept EULA control enables Windows
+  # testing, so when ACCEPT_WINDOWS_EULA=true always include tier2/windows.
+  if [ "${ACCEPT_WINDOWS_EULA}" == "true" ]; then
+    if ! _suite_list_contains "${RESOLVED_TIER2_SUITES}" "windows"; then
+      echo "ACCEPT_WINDOWS_EULA=true: adding tier2/windows (Windows is Tier-2 only)." >&2
+      _append_unique RESOLVED_TIER2_SUITES "windows"
+    fi
+  fi
+
   # Build progress units: each Tier-1 SIG + single "tier2" if any Tier-2 selected.
   local sig
   IFS=',' read -ra _t1 <<< "${RESOLVED_TIER1_SUITES}"

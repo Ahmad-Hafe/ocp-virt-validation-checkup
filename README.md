@@ -333,7 +333,7 @@ $ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} \
 
 | Environment Variable | Description | Default |
 |---------------------|-------------|---------|
-| `ACCEPT_WINDOWS_EULA` | Enable Windows testing (must be `true` to enable) | `false` |
+| `ACCEPT_WINDOWS_EULA` | Enable Windows testing (adds `tier2/windows`; Windows is Tier-2 only) | `false` |
 | `WIN_IMAGE_DOWNLOAD_URL` | Custom Windows Server 2022 ISO download URL | Default Microsoft URL |
 | `TEKTON_PIPELINE_VERSION` | Version of the `windows-efi-installer` pipeline | `>=v4.21.0` |
 

@@ -78,6 +78,8 @@ Old values keep working and keep today’s meaning:
 
 `storage` stays Tier-1 only. Full storage coverage is opt-in: `tier1/storage,tier2/storage`.
 
+Windows exists only under Tier-2. `ACCEPT_WINDOWS_EULA=true` (UI Accept EULA) always adds `tier2/windows`.
+
 ---
 
 ## Risks and Mitigations
