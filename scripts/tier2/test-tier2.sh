@@ -363,6 +363,13 @@ if [ -n "${K_EXPR}" ]; then
   TIER2_SELECTIVE_FILTER=true
 fi
 
+# Python literal list of selected module paths for auxiliary collect-only calls
+# (TEST_SKIPS counting must use the same path scope as the main pytest run).
+TIER2_PATH_ARGS_PY="[]"
+if [[ ${#TIER2_PATH_ARGS[@]} -gt 0 ]]; then
+  TIER2_PATH_ARGS_PY="$(printf '%s\n' "${TIER2_PATH_ARGS[@]}" | .venv/bin/python -c 'import json,sys; print(json.dumps([l.rstrip("\n") for l in sys.stdin if l.strip()]))')"
+fi
+
 # TODO: Remove --skip-artifactory-check before GA once openshift-virtualization-tests
 # removes the unconditional artifactory dependency from session-scoped fixtures.
 
@@ -435,7 +442,7 @@ if not test_ids:
         print(f'All tests deselected by filter: {skipped_count} counted as skipped')
 elif skip_entries:
     result = subprocess.run(
-        ['.venv/bin/pytest', '--collect-only', '-q', '-m', '${MARKERS}'],
+        ['.venv/bin/pytest', '--collect-only', '-q', '-m', '${MARKERS}'] + ${TIER2_PATH_ARGS_PY},
         capture_output=True, text=True
     )
     all_collected = result.stdout
@@ -558,9 +565,9 @@ focus_entries = sys.argv[3].split('|') if sys.argv[3] else []
 # Remove entries that are also in TEST_FOCUS (they were not skipped)
 skip_entries = [e for e in skip_entries if e not in focus_entries]
 
-# Collect all conformance test node IDs (without running them)
+# Collect conformance test node IDs within the same path scope as the main run
 result = subprocess.run(
-    ['.venv/bin/pytest', '--collect-only', '-q', '-m', '${MARKERS}'],
+    ['.venv/bin/pytest', '--collect-only', '-q', '-m', '${MARKERS}'] + ${TIER2_PATH_ARGS_PY},
     capture_output=True, text=True
 )
 collected = result.stdout

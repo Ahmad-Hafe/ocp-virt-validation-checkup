@@ -89,6 +89,13 @@ validate_test_suites() {
     echo "Invalid TEST_SUITES: empty value" >&2
     return 1
   fi
+  # Reject malformed lists that bash "read -ra" would silently drop
+  # (trailing/leading comma) or that contain empty fields.
+  if [[ "${input}" == ,* || "${input}" == *, || "${input}" == *,,* ]]; then
+    echo "Invalid TEST_SUITES: empty entry in \"${input}\"" >&2
+    echo "Expected a comma-separated list without leading/trailing/duplicate commas." >&2
+    return 1
+  fi
   IFS=',' read -ra _tokens <<< "${input}"
   for token in "${_tokens[@]}"; do
     token="$(_trim "${token}")"
