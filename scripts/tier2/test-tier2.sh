@@ -4,6 +4,12 @@ set -e
 
 readonly SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 source "${SCRIPT_DIR}/../funcs.sh"
+source "${SCRIPT_DIR}/../test-suites.sh"
+
+# Prefer selection resolved by entrypoint; otherwise resolve from TEST_SUITES.
+if [[ -z "${RESOLVED_TIER2_SUITES:-}" ]]; then
+  resolve_test_suites "${TEST_SUITES:-tier2}" || exit 1
+fi
 
 function cleanup_test_namespaces() {
     echo "Cleaning up tier2 test namespaces..."
@@ -235,9 +241,16 @@ if [ -n "${K_EXPR}" ]; then
   K_ARGS=(-k "${K_EXPR}")
 fi
 
-# Build pytest marker expression
-# Runs tests matching @pytest.mark.conformance; when no golden image is available,
-# tests with @pytest.mark.windows are excluded.
+# Build pytest path + marker selection from resolved Tier-2 SIGs.
+# Path SIGs map to OVT module directories; windows is marker-based.
+build_tier2_path_args
+WINDOWS_REQUESTED=false
+if tier2_sig_enabled "windows"; then
+  WINDOWS_REQUESTED=true
+fi
+
+# Runs tests matching @pytest.mark.conformance; when Windows is not selected or
+# no golden image is available, tests with @pytest.mark.windows are excluded.
 # A golden image is available when either:
 # - ACCEPT_WINDOWS_EULA=true (tool creates golden image), or
 # - A user-provided (BYOI) DataSource exists and is Ready
@@ -278,8 +291,13 @@ os_login_param = {
 }
 PYEOF
 
+WINDOWS_IMAGE_AVAILABLE=false
 if [ "${ACCEPT_WINDOWS_EULA}" == "true" ] || \
    { [ "${DS_READY}" == "True" ] && [ "${DS_LABEL}" != "ocp-virt-validation" ]; }; then
+  WINDOWS_IMAGE_AVAILABLE=true
+fi
+
+if [ "${WINDOWS_REQUESTED}" == "true" ] && [ "${WINDOWS_IMAGE_AVAILABLE}" == "true" ]; then
   echo "Windows golden image available - Windows tests will be included"
   cat >> "${OS_LOGIN_CONFIG}" <<'PYEOF'
 os_login_param["win-container-disk"] = {
@@ -288,7 +306,29 @@ os_login_param["win-container-disk"] = {
 }
 PYEOF
   WIN_IMAGE_FLAG="--tc=win_golden_image_name:${GOLDEN_IMAGE_NAME}"
+  # Windows-only selection focuses the marker expression.
+  if [[ ${#TIER2_PATH_ARGS[@]} -eq 0 ]] && \
+     ! tier2_sig_enabled "compute" && \
+     ! tier2_sig_enabled "storage" && \
+     ! tier2_sig_enabled "network" && \
+     ! tier2_sig_enabled "infrastructure"; then
+    MARKERS="conformance and windows"
+  fi
+elif [ "${WINDOWS_REQUESTED}" == "true" ] && [ "${WINDOWS_IMAGE_AVAILABLE}" != "true" ]; then
+  echo "WARNING: tier2/windows selected but no golden image is available; Windows tests will be skipped"
+  MARKERS="conformance and not windows"
+  # Windows-only with no image → force empty run via impossible marker combo avoided;
+  # keep "conformance and not windows" with no paths still collects non-windows. If
+  # only windows was requested, narrow to windows marker so collection is empty/skipped.
+  if [[ ${#TIER2_PATH_ARGS[@]} -eq 0 ]] && \
+     ! tier2_sig_enabled "compute" && \
+     ! tier2_sig_enabled "storage" && \
+     ! tier2_sig_enabled "network" && \
+     ! tier2_sig_enabled "infrastructure"; then
+    MARKERS="conformance and windows"
+  fi
 else
+  # Windows not selected — exclude even if a golden image happens to exist.
   MARKERS="conformance and not windows"
 fi
 
@@ -301,7 +341,20 @@ PYEOF
 OS_LOGIN_FLAG="--tc-file=${OS_LOGIN_CONFIG}"
 
 echo "Starting tier2 tests 🧪"
+echo "Resolved Tier-2 suites: ${RESOLVED_TIER2_SUITES}"
 echo "Using markers: ${MARKERS}"
+if [[ ${#TIER2_PATH_ARGS[@]} -gt 0 ]]; then
+  echo "Using module paths: ${TIER2_PATH_ARGS[*]}"
+else
+  echo "Using module paths: <all modules>"
+fi
+
+# True when path/focus/windows-only filters may legitimately collect zero tests.
+TIER2_SELECTIVE_FILTER=false
+if [ -n "${K_EXPR}" ] || [[ ${#TIER2_PATH_ARGS[@]} -gt 0 ]] || \
+   [[ "${MARKERS}" == "conformance and windows" ]]; then
+  TIER2_SELECTIVE_FILTER=true
+fi
 
 # TODO: Remove --skip-artifactory-check before GA once openshift-virtualization-tests
 # removes the unconditional artifactory dependency from session-scoped fixtures.
@@ -324,17 +377,18 @@ if [ "${DRY_RUN}" == "true" ]; then
     ${WIN_IMAGE_FLAG} \
     --collect-only -q \
     "${K_ARGS[@]}" \
+    "${TIER2_PATH_ARGS[@]}" \
     2>&1; echo $? > "${ARTIFACTS}/.exit_code") | tee ${ARTIFACTS}/tier2-log.txt &
 
   TEST_PID=$!
   echo "Tier2 test process started with PID: ${TEST_PID}"
   wait_for_pytest_pipeline "${TEST_PID}" "${ARTIFACTS}/.exit_code"
 
-  # Handle pytest exit code 5 (no tests collected due to -k/-m filter deselection).
-  # Only treat as success when a filter (TEST_FOCUS/TEST_SKIPS) was explicitly set;
+  # Handle pytest exit code 5 (no tests collected due to -k/-m/path filter deselection).
+  # Only treat as success when a selective filter was explicitly set;
   # without filters, exit 5 indicates a genuine collection failure (broken markers, etc.).
   TIER2_EXIT=$(cat "${ARTIFACTS}/.exit_code" 2>/dev/null || echo "0")
-  if [ "${TIER2_EXIT}" == "5" ] && [ -n "${K_EXPR}" ]; then
+  if [ "${TIER2_EXIT}" == "5" ] && [ "${TIER2_SELECTIVE_FILTER}" == "true" ]; then
     echo "No tier2 tests matched the filter (pytest exit code 5). Treating as success with 0 tests run."
     echo "0" > "${ARTIFACTS}/.exit_code"
   fi
@@ -428,6 +482,7 @@ else
     ${WIN_IMAGE_FLAG} \
     -s -o log_cli=true \
     "${K_ARGS[@]}" \
+    "${TIER2_PATH_ARGS[@]}" \
     --data-collector \
     --data-collector-output-dir=${ARTIFACTS} \
     --pytest-log-file=${ARTIFACTS}/pytest-logs.txt \
@@ -437,11 +492,11 @@ else
   echo "Tier2 test process started with PID: ${TEST_PID}"
   wait_for_pytest_pipeline "${TEST_PID}" "${ARTIFACTS}/.exit_code"
 
-  # Handle pytest exit code 5 (no tests collected due to -k/-m filter deselection).
-  # Only treat as success when a filter (TEST_FOCUS/TEST_SKIPS) was explicitly set;
+  # Handle pytest exit code 5 (no tests collected due to -k/-m/path filter deselection).
+  # Only treat as success when a selective filter was explicitly set;
   # without filters, exit 5 indicates a genuine collection failure (broken markers, etc.).
   TIER2_EXIT=$(cat "${ARTIFACTS}/.exit_code" 2>/dev/null || echo "0")
-  if [ "${TIER2_EXIT}" == "5" ] && [ -n "${K_EXPR}" ]; then
+  if [ "${TIER2_EXIT}" == "5" ] && [ "${TIER2_SELECTIVE_FILTER}" == "true" ]; then
     echo "No tier2 tests matched the filter (pytest exit code 5). Treating as success with 0 tests run."
     echo "0" > "${ARTIFACTS}/.exit_code"
 
