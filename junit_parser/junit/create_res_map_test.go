@@ -7,6 +7,78 @@ import (
 	"testing"
 )
 
+func TestSelectiveFilterWindowsExit5NotSetupFailure(t *testing.T) {
+	dir := t.TempDir()
+	tier2Dir := path.Join(dir, "tier2")
+	if err := os.Mkdir(tier2Dir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	phase1 := `<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="pytest" tests="1" failures="0" errors="0" skipped="0">
+  <testcase classname="tests.storage.test_a" name="test_path_ok"/>
+</testsuite>`
+
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(path.Join(tier2Dir, name), []byte(content), 0644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	write(junitFileName, phase1)
+	write("junit.phase1.xml", phase1)
+	write(".exit_code", "0\n")
+	write(".exit_code_phase1", "0\n")
+	// Runner normalizes selective-filter exit 5 to 0 before the parser runs.
+	write(".exit_code_windows", "0\n")
+	// No junit.windows.xml: focus matched path tests only.
+
+	result, err := NewResultMap(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	suite := result["tier2"]
+	if suite.SetupFailure {
+		t.Fatal("normalized Windows exit 0 with empty collection must not be SetupFailure")
+	}
+	if suite.Tests != 1 {
+		t.Fatalf("expected path-phase tests retained, got %d", suite.Tests)
+	}
+}
+
+func TestNonSplitRunIgnoresMissingPhaseMarkers(t *testing.T) {
+	dir := t.TempDir()
+	tier2Dir := path.Join(dir, "tier2")
+	if err := os.Mkdir(tier2Dir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	ok := `<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="pytest" tests="2" failures="0" errors="0" skipped="0">
+  <testcase classname="tests.storage.test_a" name="test_a"/>
+  <testcase classname="tests.storage.test_b" name="test_b"/>
+</testsuite>`
+	if err := os.WriteFile(path.Join(tier2Dir, junitFileName), []byte(ok), 0644); err != nil {
+		t.Fatalf("write junit: %v", err)
+	}
+	if err := os.WriteFile(path.Join(tier2Dir, ".exit_code"), []byte("0\n"), 0644); err != nil {
+		t.Fatalf("write exit: %v", err)
+	}
+	// No split-phase markers: simulates a non-split rerun after clearing prior artifacts.
+
+	result, err := NewResultMap(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	suite := result["tier2"]
+	if suite.SetupFailure {
+		t.Fatal("non-split successful run must not be SetupFailure")
+	}
+	if suite.Tests != 2 {
+		t.Fatalf("expected 2 tests, got %d", suite.Tests)
+	}
+}
+
 func TestPhaseSetupFailureMaskedByOtherPhaseFailures(t *testing.T) {
 	dir := t.TempDir()
 	tier2Dir := path.Join(dir, "tier2")

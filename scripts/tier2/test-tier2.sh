@@ -427,10 +427,22 @@ print(f'Merged JUnit XML into {output}')
 # TODO: Remove --skip-artifactory-check before GA once openshift-virtualization-tests
 # removes the unconditional artifactory dependency from session-scoped fixtures.
 
+# Drop split-phase markers from any prior invocation in this results dir so a
+# non-split rerun cannot inherit old setup-failure classification, and so phase1
+# evidence cannot be a stale primary JUnit from a previous attempt.
+clear_tier2_result_artifacts() {
+  rm -f "${ARTIFACTS}/.exit_code" \
+        "${ARTIFACTS}/.exit_code_phase1" \
+        "${ARTIFACTS}/.exit_code_windows" \
+        "${ARTIFACTS}/junit.results.xml" \
+        "${ARTIFACTS}/junit.phase1.xml" \
+        "${ARTIFACTS}/junit.windows.xml"
+}
+
 if [ "${DRY_RUN}" == "true" ]; then
   # In dry-run mode, collect tests and generate a proper JUnit XML with all
   # testcase elements -- aligned with how Ginkgo's --ginkgo.dry-run works.
-  rm -f "${ARTIFACTS}/.exit_code"
+  clear_tier2_result_artifacts
   (set +e; .venv/bin/pytest \
     -m "${MARKERS}" \
     --skip-artifactory-check \
@@ -564,8 +576,10 @@ print(f'Generated JUnit XML with {total_tests} test(s) ({len(test_ids)} collecte
     cat "${ARTIFACTS}/tier2-windows-log.txt" >> "${ARTIFACTS}/tier2-log.txt"
     WIN_EXIT=$(cat "${ARTIFACTS}/.exit_code_windows" 2>/dev/null || echo "0")
     # Exit 5 (no tests collected) is success only with an explicit focus/skip filter.
+    # Persist the normalized status so NewResultMap sees the same accepted code.
     if [ "${WIN_EXIT}" == "5" ] && [ "${TIER2_SELECTIVE_FILTER}" == "true" ]; then
       WIN_EXIT=0
+      echo 0 > "${ARTIFACTS}/.exit_code_windows"
     fi
     if [ "${WIN_EXIT}" == "0" ]; then
       .venv/bin/python -c "
@@ -610,7 +624,7 @@ print(f'Generated Windows dry-run JUnit with {len(test_ids)} test(s)')
   fi
 
 else
-  rm -f "${ARTIFACTS}/.exit_code"
+  clear_tier2_result_artifacts
   (set +e; .venv/bin/pytest \
     -m "${MARKERS}" \
     --skip-artifactory-check \
@@ -754,6 +768,7 @@ if matched:
     if [ "${WIN_EXIT}" == "5" ] && [ "${TIER2_SELECTIVE_FILTER}" == "true" ]; then
       echo "No Windows tests matched the filter (pytest exit code 5). Treating Windows phase as success."
       WIN_EXIT=0
+      echo 0 > "${ARTIFACTS}/.exit_code_windows"
     fi
     # Merge only XML produced by this invocation (file was removed before the phase).
     # Merge even on failure so real Windows failures appear in the primary report.

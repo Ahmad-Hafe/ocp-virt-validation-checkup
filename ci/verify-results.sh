@@ -107,10 +107,14 @@ for junit_file in $(find "${RESULTS_DIR}" -type f -name "junit*.xml"); do
     continue
   fi
 
-  # Prefer aggregate <testsuites ...> counts (merged path+Windows reports).
-  # Fall back to the first <testsuite ...> header for single-suite files.
+  # Prefer aggregate <testsuites ...> counts only for pytest-style merges that
+  # include skipped= (path+Windows). SSP/Ginkgo wrappers often have tests= and
+  # disabled= without skipped=; those must use the child <testsuite> header so
+  # counts match the summary parser.
   JUNIT_LINE=$(grep -m 1 '<testsuites ' "${junit_file}" || true)
-  if [[ -z "${JUNIT_LINE}" ]] || ! [[ ${JUNIT_LINE} =~ tests=\"([0-9]+)\" ]]; then
+  if [[ -z "${JUNIT_LINE}" ]] \
+    || ! [[ ${JUNIT_LINE} =~ tests=\"([0-9]+)\" ]] \
+    || ! [[ ${JUNIT_LINE} =~ skipped=\"([0-9]+)\" ]]; then
     # Match <testsuite but not <testsuites
     JUNIT_LINE=$(grep -m 1 '<testsuite ' "${junit_file}" || true)
   fi
